@@ -1,0 +1,20 @@
+# Data is reproducible from the pipeline scripts; never committed.
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Credentials -- never commit. See README for Earthdata setup.
+.netrc
+.env
+*.pem
+
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+node_modules/
+web/dist/
+.DS_Store

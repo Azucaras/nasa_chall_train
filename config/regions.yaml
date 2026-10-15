@@ -1,0 +1,45 @@
+# Pilot regions and municipalities.
+#
+# Human-authored, declarative. Derived values (centroids, mesh geometry) are NOT stored here --
+# pipeline/fetch_regions.py computes them from the IBGE malhas API and writes
+# data/processed/regions.parquet. IBGE codes below were read from the IBGE localidades API.
+
+meta:
+  # Baseline used for every monthly climatology and anomaly in the project.
+  climatology_baseline: [1991, 2020]
+  # Crop year runs Jul-Jun and is labelled by its harvest year, to align with IBGE PAM.
+  crop_year_start_month: 7
+  # Months composited for the ENSO signal: the Brazilian summer-crop season.
+  season_months: [9, 10, 11, 12, 1, 2, 3, 4]
+
+regions:
+  - id: rs
+    name: Rio Grande do Sul
+    name_en: Rio Grande do Sul
+    enso_signal: excess          # El Nino -> rainfall surplus Sep-Dec
+    signal_label_pt: Excesso hidrico no El Nino
+    signal_label_en: Water excess under El Nino
+    # Dominant mechanisms of loss, used to word the explanations.
+    hazards: [waterlogging, erosion, delayed_planting, harvest_rain]
+    municipalities:
+      - code: 4322202
+        name: Tupancireta
+        uf: RS
+        # Largest soybean area in Rio Grande do Sul; classic soy-wheat/oat system.
+        mesoregion: Centro Ocidental Rio-grandense
+        source_code: IBGE localidades API
+
+  - id: matopiba
+    name: MATOPIBA
+    name_en: MATOPIBA
+    enso_signal: deficit         # El Nino -> rainfall deficit and mid-season dry spells
+    signal_label_pt: Deficit hidrico no El Nino
+    signal_label_en: Water deficit under El Nino
+    hazards: [drought, veranico, late_onset, safrinha_failure]
+    municipalities:
+      - code: 2919553
+        name: Luis Eduardo Magalhaes
+        uf: BA
+        # Core of the western Bahia cerrado frontier; soy-safrinha maize and cotton.
+        mesoregion: Extremo Oeste Baiano
+        source_code: IBGE localidades API
