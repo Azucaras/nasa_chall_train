@@ -26,8 +26,9 @@ import pyarrow.parquet as pq
 
 from pipeline.common import PROCESSED_DIR, load_config
 
-# 1.1 adds optional blocks (forecast, vegetation, land_cover, terrain); 1.0 clients ignore them.
-CONTRACT_VERSION = "1.1"
+# 1.1 adds optional blocks (forecast, vegetation, land_cover, terrain); 1.2 adds `rotations`.
+# Each version only adds fields, so older clients keep working.
+CONTRACT_VERSION = "1.2"
 ENSO_CLASSES = ["el_nino_strong", "el_nino_moderate", "neutral", "la_nina"]
 
 
@@ -266,6 +267,7 @@ def municipality_payload(code: int) -> dict[str, Any]:
         "vegetation": _vegetation_block(code, comps),
         "land_cover": _land_cover_block(code),
         "terrain": _terrain_block(code),
+        "rotations": rotations_block(code, current),
         "climate": {
             "seasons": records(climate, climate_cols),
             "composites": {
@@ -284,6 +286,78 @@ def municipality_payload(code: int) -> dict[str, Any]:
             "rules": "config/analysis.yaml, config/crops.yaml",
         },
     })
+
+
+def rotations_block(code: int, current: pd.DataFrame | None = None) -> dict[str, Any] | None:
+    """Every candidate rotation scored for every ENSO class, with all the numbers behind it.
+
+    Totals for the default weights are included for convenience; a client changing the weights
+    recomputes them with the same formula (scoring.weighted_total), documented in `formula`.
+    """
+    from pipeline import scoring
+
+    scores = optional("rotation_scores.parquet")
+    if scores is None:
+        return None
+    s = scores[scores.code == code]
+    if s.empty:
+        return None
+    cfg = load_config("rotations.yaml")
+    region = frame("regions.parquet").set_index("code").loc[code, "region_id"]
+    weights = cfg["meta"]["default_weights"]
+    by_class = {}
+    for cls, g in s.groupby("enso_class", sort=False):
+        results = [json.loads(x) for x in g.result]
+        by_class[cls] = scoring.rank(results, weights)
+    clim = optional("monthly_climate_by_class.parquet")
+    climate = {}
+    if clim is not None:
+        c = round_floats(clim[clim.code == code], 1)
+        climate = {cls: records(g.drop(columns=["code", "enso_class"])) for cls, g in c.groupby("enso_class")}
+    if current is None:
+        cy = frame("crop_year_enso.parquet")
+        current = cy[cy.crop_year == int(file_meta("season_progress.parquet")["current_crop_year"])]
+    cur = records(current)[0] if current is not None and not current.empty else {}
+    crop_ids = sorted({c for rot in cfg["rotations"][region] for c in rot["crops"]})
+    cal_source = cfg["calendars"][region]["source"]
+    return clean({
+        "current_class": cur.get("enso_class"),
+        "current_class_is_forecast": bool(cur.get("forecast", False)),
+        "default_weights": weights,
+        "formula": "total = sum(weight_i * score_i) / sum(weight_i), over components with weight > 0; "
+                   "score_i = min-max 0-100 across candidates (100 = best)",
+        "components": {
+            "soil": {"metric": "heavy_rain_days_on_bare_soil", "unit": "days/yr", "better": "lower"},
+            "water": {"metric": "crop_water_deficit", "unit": "mm/yr", "better": "lower"},
+            "income": {"metric": "revenue_change_in_class", "unit": "%", "better": "higher"},
+        },
+        "crops": {cid: {k: cfg["crops"][cid].get(k) for k in ("name_pt", "name_en", "cover_crop")} for cid in crop_ids},
+        "by_class": by_class,
+        "climate_by_class": climate,
+        "assumptions": [{"scope": "calendar", "region": region, "source": cal_source}] if cal_source == "suposicao" else [],
+        "provenance": {
+            "kc": cfg["kc_source"],
+            "calendar": f"config/rotations.yaml calendars.{region} (source: {cal_source})",
+            "climate": file_meta("rotation_scores.parquet").get("climate_source"),
+            "revenue": file_meta("rotation_scores.parquet").get("revenue_source"),
+            "yield_anomalies": "IBGE PAM yield anomalies by ENSO class (composites)",
+            "limitations": "monthly water balance without soil storage; gross revenue, not margin; "
+                           "scores are relative among these candidates",
+        },
+    })
+
+
+def ranked_rotations(code: int, enso_class: str, weights: dict[str, float]) -> list[dict[str, Any]]:
+    """Ranking for arbitrary weights (the API endpoint). Same pure function the build uses."""
+    from pipeline import scoring
+
+    scores = optional("rotation_scores.parquet")
+    if scores is None:
+        raise DataMissing("rotation_scores.parquet not found; run pipeline.build_scoring")
+    s = scores[(scores.code == code) & (scores.enso_class == enso_class)]
+    if s.empty:
+        raise KeyError((code, enso_class))
+    return clean(scoring.rank([json.loads(x) for x in s.result], weights))
 
 
 def _forecast_block(code: int) -> dict[str, Any] | None:

@@ -506,3 +506,40 @@ def ndvi_progress(
             "n_analog": int(len(ana)),
         })
     return pd.DataFrame(rows)
+
+
+# --------------------------------------------------------------------------------------------
+# Monthly climate by ENSO class (input to rotation scoring)
+# --------------------------------------------------------------------------------------------
+
+
+def monthly_climate_by_class(
+    daily: pd.DataFrame, cy_enso: pd.DataFrame, heavy_day_mm: float, start_month: int = 7
+) -> pd.DataFrame:
+    """Mean monthly rain, heavy-rain days and ET0 per (code, ENSO class, calendar month).
+
+    ``daily`` needs code, date, PRECTOTCORR and ET0. A month enters the rain/heavy-day means only if
+    every day has rain, and the ET0 mean only if every day has ET0 (POWER's solar radiation has gaps
+    in the early 1980s). Months take the ENSO class of their crop year (Jul-Jun); forecast crop years
+    are excluded. Class "all" is every observed year, for reference.
+    """
+    d = daily.copy()
+    d["crop_year"] = crop_year(d.date, start_month)
+    d["month"] = d.date.dt.month
+    d["heavy"] = (d.PRECTOTCORR >= heavy_day_mm).astype(float).where(d.PRECTOTCORR.notna())
+    g = d.groupby(["code", "crop_year", "month"]).agg(
+        days=("date", "size"), rain_days=("PRECTOTCORR", "count"), et0_days=("ET0", "count"),
+        rain_mm=("PRECTOTCORR", "sum"), heavy_days=("heavy", "sum"), et0_mm=("ET0", "sum"),
+        first=("date", "min"),
+    ).reset_index()
+    full = g.first.dt.days_in_month
+    g.loc[(g.days != full) | (g.rain_days != full), ["rain_mm", "heavy_days"]] = np.nan
+    g.loc[(g.days != full) | (g.et0_days != full), "et0_mm"] = np.nan
+    obs = cy_enso[~cy_enso.forecast.fillna(False).astype(bool)][["crop_year", "enso_class"]]
+    g = g.merge(obs, on="crop_year", how="inner")
+    both = pd.concat([g, g.assign(enso_class="all")], ignore_index=True)
+    out = both.groupby(["code", "enso_class", "month"]).agg(
+        rain_mm=("rain_mm", "mean"), heavy_days=("heavy_days", "mean"), et0_mm=("et0_mm", "mean"),
+        n_years=("rain_mm", "count"), n_years_et0=("et0_mm", "count"),
+    ).reset_index()
+    return out

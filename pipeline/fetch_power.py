@@ -82,8 +82,11 @@ def parse_power(payload: dict) -> tuple[pd.DataFrame, dict[str, str]]:
     df.index = pd.to_datetime(df.index, format="%Y%m%d")
     df = df.mask(df == fill)
     df.index.name = "date"
+    coords = payload.get("geometry", {}).get("coordinates", [])
     info = {"sources": ",".join(header.get("sources", [])), "fill_value": str(fill),
-            "api_version": header.get("api", {}).get("version", "")}
+            "api_version": header.get("api", {}).get("version", ""),
+            # POWER returns the grid cell's elevation as the third coordinate; FAO-56 ET0 needs it.
+            "elevation_m": float(coords[2]) if len(coords) > 2 else float("nan")}
     return df.reset_index(), info
 
 
@@ -97,7 +100,7 @@ def drop_unpublished_tail(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def fetch_point(code: int, lon: float, lat: float, end: date, refresh: bool) -> tuple[pd.DataFrame, set[str]]:
-    frames, sources = [], set()
+    frames, sources, elevation = [], set(), float("nan")
     for a, b in chunks(START, end):
         url = POWER_URL.format(params=",".join(PARAMETERS), lon=lon, lat=lat,
                                start=a.strftime("%Y%m%d"), end=b.strftime("%Y%m%d"))
@@ -105,8 +108,10 @@ def fetch_point(code: int, lon: float, lat: float, end: date, refresh: bool) -> 
         df, info = parse_power(json.loads(text))
         frames.append(df)
         sources.update(info["sources"].split(","))
+        elevation = info["elevation_m"]
     out = drop_unpublished_tail(pd.concat(frames, ignore_index=True))
     out.insert(0, "code", code)
+    out["elevation_m"] = elevation
     return out, sources
 
 

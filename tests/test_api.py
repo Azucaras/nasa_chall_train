@@ -47,7 +47,8 @@ def built(tmp_path_factory):
     dates = pd.date_range("1981-01-01", "2026-11-11")
     daily = pd.DataFrame({"code": CODE, "date": dates,
                           "PRECTOTCORR": rng.gamma(0.5, 8, len(dates)),
-                          "GWETROOT": 0.5, "T2M_MAX": 28.0})
+                          "GWETROOT": 0.5, "T2M_MAX": 28.0, "T2M_MIN": 16.0, "RH2M": 70.0,
+                          "WS2M": 2.0, "ALLSKY_SFC_SW_DWN": 20.0, "elevation_m": 400.0})
     _write(daily, d / "power_daily.parquet")
 
     years = np.arange(1974, 2026)
@@ -56,7 +57,8 @@ def built(tmp_path_factory):
                       "crop_code": crop, "crop": name, "variable_code": var, "variable": vname,
                       "unit": "x", "value": value, "flag": ""})
         for crop, name in ((2713, "Soja (em grão)"), (2716, "Trigo (em grão)"))
-        for var, vname, value in ((109, "area_planted_ha", 1000.0),
+        for var, vname, value in ((109, "area_planted_ha", 1000.0), (216, "area_harvested_ha", 1000.0),
+                                  (215, "production_value", 3000.0),
                                   (112, "yield_kg_ha", 1500 + 30 * (years - 1974) + rng.normal(0, 100, len(years))))
     ])
     _write(pam, d / "pam.parquet")
@@ -94,15 +96,18 @@ def built(tmp_path_factory):
 @pytest.fixture(scope="module")
 def client(built):
     import pipeline.build_evidence as be
+    import pipeline.build_scoring as bs
     import pipeline.common as common
     from api import repository as repo
 
     mp = pytest.MonkeyPatch()
     mp.setattr(common, "PROCESSED_DIR", built)
     mp.setattr(be, "PROCESSED_DIR", built)
+    mp.setattr(bs, "PROCESSED_DIR", built)
     mp.setattr(sys, "argv", ["build_evidence"])
     mp.setenv("FIELD_PHASE_DATA_DIR", str(built))
     be.main()
+    bs.main()
     repo.clear_cache()
 
     from api.main import app
@@ -113,7 +118,7 @@ def client(built):
 
 def test_meta(client):
     m = client.get("/api/v1/meta").json()
-    assert m["contract_version"] == "1.1"
+    assert m["contract_version"] == "1.2"
     assert m["mock"] is False
     assert m["current_crop_year"] == 2027
     assert m["enso_classes"] == ["el_nino_strong", "el_nino_moderate", "neutral", "la_nina"]
@@ -169,6 +174,37 @@ def test_optional_integrations_are_null_when_not_run(client):
     """No Meteomatics / Planetary Computer outputs in the fixture -> those blocks are null, and
     everything else still works (a team without those accounts gets a valid payload)."""
     r = client.get(f"/api/v1/municipalities/{CODE}").json()
-    for block in ("forecast", "vegetation", "land_cover", "terrain"):
+    for block in ("forecast", "vegetation", "land_cover", "terrain"):  # rotations *are* built here
         assert r[block] is None
     assert r["season_progress"]["forecast_model"] is None
+
+
+def test_rotations_block(client):
+    r = client.get(f"/api/v1/municipalities/{CODE}").json()["rotations"]
+    assert r["current_class_is_forecast"] is True
+    assert set(r["by_class"]) == {"el_nino_strong", "el_nino_moderate", "neutral", "la_nina"}
+    assert r["assumptions"][0]["source"] == "suposicao"  # calendars are flagged
+    rows = {x["id"]: x for x in r["by_class"]["el_nino_strong"]}
+    # Only soy and wheat exist in the synthetic PAM: other cash crops cannot be scored on income.
+    assert rows["soja_trigo"]["income"]["value"] is not None
+    assert rows["soja_canola"]["income"]["value"] is None and rows["soja_canola"]["rank"] is None
+    for comp in ("soil", "water", "income"):
+        assert {"value", "score"} <= rows["soja_trigo"][comp].keys()
+
+
+def test_rotation_endpoint_reranks_with_weights(client):
+    def order(**w):
+        q = "&".join(f"{k}={v}" for k, v in w.items())
+        res = client.get(f"/api/v1/municipalities/{CODE}/rotations?enso_class=el_nino_strong&{q}").json()
+        return [x["id"] for x in res["rotations"] if x["rank"] is not None]
+
+    soil_only = order(soil=1, water=0, income=0)
+    # A cover crop leaves no month bare, so it cannot lose on soil to soy followed by fallow.
+    assert soil_only.index("soja_aveia_cobertura") < soil_only.index("soja_pousio")
+    # With income weighted, rotations lacking income data drop out of the ranking.
+    assert "soja_canola" not in order(soil=1, water=1, income=1)
+    assert "soja_canola" in order(soil=1, water=1, income=0)
+
+
+def test_rotation_endpoint_404(client):
+    assert client.get(f"/api/v1/municipalities/{CODE}/rotations?enso_class=nope").status_code == 404

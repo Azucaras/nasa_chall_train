@@ -197,3 +197,16 @@ class TestNdvi:
         # October (season start side) comes before December, which comes before January/February.
         assert [d[:2] for d in out.label_date] == ["10", "12", "01", "02", "02"]  # 17 Jan was cloudy
         assert out.slot.is_monotonic_increasing
+
+
+def test_monthly_climate_by_class():
+    dates = pd.date_range("2014-07-01", "2016-06-30")
+    daily = pd.DataFrame({"code": 1, "date": dates, "PRECTOTCORR": 1.0, "ET0": 4.0})
+    daily.loc[daily.date == "2015-12-25", "PRECTOTCORR"] = 30.0
+    daily.loc[daily.date == "2015-01-10", "ET0"] = np.nan  # incomplete ET0 month
+    cy = pd.DataFrame({"crop_year": [2015, 2016], "enso_class": ["neutral", "el_nino_strong"], "forecast": [False, False]})
+    out = ev.monthly_climate_by_class(daily, cy, 20.0).set_index(["enso_class", "month"])
+    dec = out.loc[("el_nino_strong", 12)]
+    assert dec.rain_mm == 30 + 30 and dec.heavy_days == 1 and dec.et0_mm == 124
+    assert np.isnan(out.loc[("neutral", 1)].et0_mm) and out.loc[("neutral", 1)].rain_mm == 31
+    assert out.loc[("all", 12)].n_years == 2
