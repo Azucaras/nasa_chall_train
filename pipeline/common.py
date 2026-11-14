@@ -104,6 +104,35 @@ def fetch_text(url: str, cache_name: str, refresh: bool = False) -> str:
     return text
 
 
+def fetch_file(url: str, cache_name: str, refresh: bool = False) -> Path:
+    """Download a binary file to data/raw/, streaming, and return its path.
+
+    Sends a HEAD first and logs the size before committing to the download (project rule 6). The
+    file is written to a .part name and renamed only when complete, so an interrupted download is
+    never mistaken for a cached one.
+    """
+    RAW_DIR.mkdir(parents=True, exist_ok=True)
+    cache = RAW_DIR / cache_name
+    if cache.exists() and not refresh:
+        log.info("cache hit: %s", cache.name)
+        return cache
+
+    headers = {"User-Agent": USER_AGENT}
+    head = requests.head(url, timeout=TIMEOUT, headers=headers, allow_redirects=True)
+    size = head.headers.get("Content-Length")
+    log.info("GET %s (%s)", url, f"{int(size) / 1e6:.1f} MB" if size else "size unknown")
+
+    part = cache.with_suffix(cache.suffix + ".part")
+    with requests.get(url, timeout=TIMEOUT, headers=headers, stream=True) as resp:
+        resp.raise_for_status()
+        with part.open("wb") as fh:
+            for chunk in resp.iter_content(1 << 20):
+                fh.write(chunk)
+    part.replace(cache)
+    log.info("cached %s (%.1f MB)", cache.name, cache.stat().st_size / 1e6)
+    return cache
+
+
 def fetch_json(url: str, cache_name: str, refresh: bool = False) -> Any:
     import json
 
