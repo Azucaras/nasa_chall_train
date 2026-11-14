@@ -28,9 +28,11 @@ export function I18nProvider({ locale, children }: { locale: Locale; children: R
       fmt,
       signed: (n, unit = "", digits = 0) => {
         if (n == null) return "—";
-        const s = fmt(Math.abs(n), digits);
+        // Sign from the *rounded* value, so -0.4 shows as "0%", never "−0%".
+        const r = Number(n.toFixed(digits));
+        const s = fmt(Math.abs(r), digits);
         // U+2212 minus, so negative values align with positive ones in tables.
-        return `${n > 0 ? "+" : n < 0 ? "−" : ""}${s}${unit}`;
+        return `${r > 0 ? "+" : r < 0 ? "−" : ""}${s}${unit}`;
       },
       date: (iso) => (iso ? dateFmt.format(new Date(`${iso.slice(0, 10)}T00:00:00Z`)) : "—"),
     };

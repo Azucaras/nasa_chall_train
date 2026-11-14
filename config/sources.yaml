@@ -90,6 +90,24 @@ sources:
     use: phase2
     probe: https://cmr.earthdata.nasa.gov/search/granules.json?short_name=SPL4SMGP&page_size=1&sort_key=-start_date
     verified: ok (search only; downloads need Earthdata login)
+  - id: meteomatics
+    name: Meteomatics Weather API (15-day mix, ECMWF extended + seasonal ensembles)
+    coverage: global
+    access: api
+    auth: key (HTTP basic; Space Apps hackathon or free Basic account)
+    cadence: several runs per day; seasonal monthly
+    use: core
+    probe: https://api.meteomatics.com/
+    verified: ok with the hackathon account (all products in config/meteomatics.yaml); unauthenticated probe gets 401
+  - id: planetary_computer
+    name: Microsoft Planetary Computer STAC (MODIS NDVI, io-lulc land cover, Copernicus DEM)
+    coverage: global
+    access: api
+    auth: none (anonymous SAS tokens)
+    cadence: per collection (MODIS 16-day)
+    use: core
+    probe: https://planetarycomputer.microsoft.com/api/stac/v1/collections/modis-13Q1-061
+    verified: ok; data on modiseuwest / ai4edataeuwest / elevationeuwest .blob.core.windows.net
   - id: inmet
     name: INMET station API (Brazil)
     coverage: brazil

@@ -97,6 +97,8 @@ components render it. The most generic pieces:
 | `SeasonProgressChart` | daily cumulative current / mean / p10–p90 / analog | any "this season vs normal" view |
 | `EnsoStatus`, `EnsoOutlookChart`, `RoniHistoryChart` | `/enso` payload | the current ENSO state, as-is |
 | `MunicipalityMap` | a GeoJSON FeatureCollection + list | point-and-pick maps |
+| `ForecastPanel`, `SeasonOutlookChart` | `forecast` block (Meteomatics) | 15-day tiles and daily rain; monthly median + 10–90 % vs normal |
+| `VegetationPanel`, `TerrainBars`, `LandCoverTile` | `vegetation` / `terrain` / `land_cover` blocks (Planetary Computer) | NDVI vs normal band; relief-class segmented bars; cropland share |
 | `ChartFrame`, `StatTile`, `Legend`, `TooltipBox` | anything | consistent cards around your own charts |
 | `AssumptionNotice`, `MockBanner` | — | honest labelling of assumptions and mock data |
 

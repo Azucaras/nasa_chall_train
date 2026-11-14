@@ -1,5 +1,6 @@
 /**
- * Field Phase data contract, version 1.
+ * Field Phase data contract, version 1.1 (1.1 adds the optional forecast, vegetation, land_cover
+ * and terrain blocks; each is null when its integration has not been run).
  *
  * Mirrors api/repository.py exactly. Every payload is plain JSON: numbers may be null (never NaN),
  * dates are ISO strings, categorical fields are stable codes and never translated text.
@@ -162,6 +163,117 @@ export interface SeasonDay {
   baseline_p10_mm: number | null;
   baseline_p90_mm: number | null;
   analog_mean_mm: number | null;
+  /** Ensemble forecast continuing the curve (median and 10-90 % across members). */
+  forecast_median_mm?: number | null;
+  forecast_p10_mm?: number | null;
+  forecast_p90_mm?: number | null;
+}
+
+export interface ForecastProductStatus {
+  product: "short_range" | "extended" | "seasonal" | string;
+  source: string;
+  status: "ok" | "unavailable";
+  reason: string;
+  first_date: string | null;
+  last_date: string | null;
+}
+
+export interface ForecastSummary {
+  issued_utc_day: string;
+  start: string;
+  end: string;
+  days: number;
+  rain_mm: number;
+  heavy_days: number;
+  max_dry_spell_days: number;
+  normal_rain_mm: number | null;
+  normal_p10_mm: number | null;
+  normal_p90_mm: number | null;
+  n_normal_years: number;
+  analog_rain_mm: number | null;
+  n_analog_years: number;
+  et0_mm?: number | null;
+  water_balance_mm?: number | null;
+  smi_15cm_start?: number | null;
+  smi_15cm_end?: number | null;
+  smi_50cm_start?: number | null;
+  smi_50cm_end?: number | null;
+}
+
+export interface ForecastDay {
+  date: string;
+  kind: "recent" | "forecast";
+  rain: number | null;
+  rain_probability?: number | null;
+  tmax?: number | null;
+  tmin?: number | null;
+  et0?: number | null;
+  smi_15cm?: number | null;
+  smi_50cm?: number | null;
+}
+
+export interface OutlookMonth {
+  month: string;
+  forecast_median_mm: number;
+  forecast_p10_mm: number;
+  forecast_p90_mm: number;
+  n_members: number;
+  normal_mm: number | null;
+  normal_p10_mm: number | null;
+  normal_p90_mm: number | null;
+  analog_mm: number | null;
+  n_analog: number;
+}
+
+export interface ForecastBlock {
+  provider: string;
+  issued_utc_day: string | null;
+  products: ForecastProductStatus[];
+  short_range: { summary: ForecastSummary; days: ForecastDay[] } | null;
+  season_outlook: OutlookMonth[] | null;
+  provenance: Record<string, string>;
+}
+
+export interface NdviSlot {
+  slot: number;
+  doy: number;
+  label_date: string;
+  current: number | null;
+  current_date: string | null;
+  baseline_mean: number | null;
+  baseline_p10: number | null;
+  baseline_p90: number | null;
+  n_baseline: number;
+  analog_mean: number | null;
+  n_analog: number;
+}
+
+export interface VegetationBlock {
+  baseline_crop_years: string | null;
+  last_composite: string | null;
+  seasons: {
+    crop_year: number;
+    ndvi_peak: number;
+    n_composites: number;
+    ndvi_peak_anom: number | null;
+    ndvi_peak_anom_pct: number | null;
+    enso_class: EnsoClass | null;
+  }[];
+  composite: CompositeRow[];
+  progress: NdviSlot[];
+  provenance: Record<string, string>;
+}
+
+export interface LandCoverBlock {
+  years: { year: number; cropland_share: number; cropland_km2: number }[];
+  provenance: Record<string, string>;
+}
+
+export type ReliefClass = "plano" | "suave_ondulado" | "ondulado" | "forte_ondulado" | "montanhoso" | "escarpado";
+
+export interface TerrainBlock {
+  by_scope: Record<"municipality" | "cropland", { median_slope_pct: number; classes: { relief_class: ReliefClass; share: number }[] }>;
+  provenance: Record<string, string>;
 }
 
 export interface MunicipalityPayload {
@@ -174,7 +286,12 @@ export interface MunicipalityPayload {
     n_analog: number;
     analog_years: number[];
     days: SeasonDay[];
+    forecast_model?: string | null;
   };
+  forecast?: ForecastBlock | null;
+  vegetation?: VegetationBlock | null;
+  land_cover?: LandCoverBlock | null;
+  terrain?: TerrainBlock | null;
   climate: {
     seasons: ClimateSeason[];
     composites: Record<string, { unit: string; by_class: CompositeRow[] }>;

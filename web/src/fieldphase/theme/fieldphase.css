@@ -32,6 +32,14 @@
   --fp-series-baseline: #898781;
   --fp-series-band: rgba(137, 135, 129, 0.16);
   --fp-series-analog: #e34948;
+  --fp-series-forecast-band: rgba(42, 120, 214, 0.16);
+  /* Ordinal ramp (one hue; reference blue steps 250..700 on light). */
+  --fp-ordinal-1: #86b6ef;
+  --fp-ordinal-2: #5598e7;
+  --fp-ordinal-3: #2a78d6;
+  --fp-ordinal-4: #1c5cab;
+  --fp-ordinal-5: #104281;
+  --fp-ordinal-6: #0d366b;
 
   --fp-warning-bg: #fff4dc;
   --fp-warning-ink: #6b4a00;
@@ -69,6 +77,13 @@
     --fp-series-baseline: #7a7974;
     --fp-series-band: rgba(195, 194, 183, 0.12);
     --fp-series-analog: #e66767;
+    --fp-series-forecast-band: rgba(57, 135, 229, 0.2);
+    --fp-ordinal-1: #b7d3f6;
+    --fp-ordinal-2: #6da7ec;
+    --fp-ordinal-3: #3987e5;
+    --fp-ordinal-4: #256abf;
+    --fp-ordinal-5: #1c5cab;
+    --fp-ordinal-6: #184f95;
     --fp-warning-bg: #2e2510;
     --fp-warning-ink: #f5d58a;
   }
@@ -94,6 +109,13 @@
   --fp-series-baseline: #7a7974;
   --fp-series-band: rgba(195, 194, 183, 0.12);
   --fp-series-analog: #e66767;
+  --fp-series-forecast-band: rgba(57, 135, 229, 0.2);
+  --fp-ordinal-1: #b7d3f6;
+  --fp-ordinal-2: #6da7ec;
+  --fp-ordinal-3: #3987e5;
+  --fp-ordinal-4: #256abf;
+  --fp-ordinal-5: #1c5cab;
+  --fp-ordinal-6: #184f95;
   --fp-warning-bg: #2e2510;
   --fp-warning-ink: #f5d58a;
 }
@@ -532,6 +554,28 @@
   .fp-dbar-axis > span:first-child {
     display: none;
   }
+}
+
+/* Tall segmented bar: one whole split into ordered parts (TerrainBars). */
+.fp-segbar {
+  display: flex;
+  height: 28px;
+  margin-top: 4px;
+  gap: 2px;
+}
+.fp-segbar-part {
+  display: flex;
+  align-items: center;
+  padding-left: 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  min-width: 2px;
+}
+.fp-segbar-part[data-active] {
+  outline: 2px solid var(--fp-ink);
+  outline-offset: 1px;
 }
 
 /* Recharts text picks up the kit's ink tokens. */

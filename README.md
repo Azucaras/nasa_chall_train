@@ -8,7 +8,9 @@ NASA Space Apps Challenge 2026 — *Field Shift: Adapting Farms with NASA Data*.
 > interface shows it. See [Current state](#current-state).
 >
 > **New here?** Read [docs/how_it_works.md](docs/how_it_works.md) — the backend explained end to
-> end. Reusing the interface in another project: [web/README.md](web/README.md).
+> end. Meteomatics forecasts and Planetary Computer satellite data:
+> [docs/integrations.md](docs/integrations.md). Reusing the interface in another project:
+> [web/README.md](web/README.md).
 
 ---
 
@@ -80,6 +82,8 @@ uv run python -m pipeline.fetch_regions  # municipality boundaries + centroids (
 uv run python -m pipeline.fetch_enso     # ONI, RONI, weekly Niño, CPC discussion + strength outlook
 uv run python -m pipeline.fetch_power    # daily NASA POWER at each centroid, 1981-today
 uv run python -m pipeline.fetch_pam      # IBGE PAM yields, tables 1612 and 839
+uv run python -m pipeline.fetch_meteomatics  # optional: 15-day / 46-day / seasonal forecasts (needs a Meteomatics login)
+uv run python -m pipeline.fetch_planetary    # optional: MODIS NDVI, land cover, slope (uv sync --extra planetary)
 uv run python -m pipeline.build_evidence # seasons, anomalies, ENSO composites, season-to-date
 uv run python -m api.export              # write the API responses as JSON for the web app
 uv run python -m pipeline.probe_sources  # check that every data source still answers (a few KB each)
@@ -137,6 +141,8 @@ notebooks/  exploration and presentation figures
 | Municipality codes, boundaries | IBGE *localidades* and *malhas* APIs | current | none |
 | Rainfall | GPM IMERG Final `GPM_3IMERGDF`; [CHIRPS v3.0](https://data.chc.ucsb.edu/products/CHIRPS/v3.0/) | 2000–; 1981– | Earthdata; none |
 | Station weather | INMET automatic stations, `apitempo.inmet.gov.br` | varies | none (send a User-Agent) |
+| Forecasts | [Meteomatics](https://www.meteomatics.com/en/api/getting-started/): `mix` 15 days; ECMWF `ecmwf-vareps` 46 days and `ecmwf-mmsf` 6 months, 51 members | current | Meteomatics account |
+| Vegetation, land cover, slope | [Microsoft Planetary Computer](https://planetarycomputer.microsoft.com/): `modis-13Q1-061`, `io-lulc-annual-v02`, `cop-dem-glo-30` | 2000–; 2017–2023; static | none |
 | Root-zone soil moisture | SMAP L4 `SPL4SMGP`, 9 km | **2015–** | Earthdata |
 | Vegetation | MODIS MOD13Q1 v061, 250 m (VIIRS VNP13 as fallback) | 2000– | Earthdata |
 | Evapotranspiration | MOD16A2 | 2000– | Earthdata |
@@ -221,6 +227,26 @@ These are enforced in review, and in `CLAUDE.md`:
 | Sorghum yield vs trend | — | −20 % (n=2) |
 | Rain since 1 Sep 2026 | 624 mm vs 448 mm normal | 93 mm vs 169 mm normal |
 
+**Done (Meteomatics + Planetary Computer):** see [docs/integrations.md](docs/integrations.md).
+
+- `fetch_meteomatics` — 15-day forecast (rain, ET0, soil moisture index, temperatures) and ECMWF
+  46-day / seasonal ensembles with all 51 members; credentials from env vars, `~/.netrc` or a proxy,
+  never from the repo.
+- `fetch_planetary` — stable-cropland mask from 10 m land cover, MODIS NDVI over that cropland for
+  every composite since 2000, and Embrapa relief classes from the Copernicus DEM.
+- New API blocks (contract 1.1, all optional) and interface panels: forecast tiles and daily rain,
+  forecast band on the season curve, seasonal outlook, NDVI this season vs normal, cropland share,
+  terrain bars.
+- 102 tests passing.
+
+| Forecast / satellite (issued 14 Nov 2026) | Tupanciretã (RS) | Luís Eduardo Magalhães (BA) |
+|---|---|---|
+| Rain next 15 days | 150 mm vs 66 normal | 110 mm vs 119 normal |
+| Rain accumulated by 28 Dec (median of 51) | 939 mm vs 677 normal | 447 mm vs 523 normal |
+| Seasonal outlook Dec–Apr | above normal every month | below normal every month |
+| Cropland on ≥ 8 % slope | 35 % | 0.2 % |
+| Peak NDVI, strong El Niño (n = 2) | −0.5 % (no signal) | +0.4 % (no signal) |
+
 **Not started:** rotation scoring (`pipeline/scoring.py`, `config/rotations.yaml`), CHIRPS, Phases
 2–4.
 
@@ -248,6 +274,14 @@ These are enforced in review, and in `CLAUDE.md`:
 - `config/regions.yaml` describes LEM as "soy-safrinha maize and cotton", but PAM records 2nd-crop
   maize there only in 2012–2015 (~1 000 ha) and none since; the main companions of soy are cotton,
   sorghum, 1st-crop maize and beans. The *safrinha_failure* hazard label may need revisiting.
+- Forecasts (Meteomatics/ECMWF) are compared with NASA POWER normals: two sources, two model
+  climatologies. Seasonal forecasts for a single point have low skill; the UI says to read the
+  direction, not the number.
+- NDVI anomalies use a 2001–2020 baseline (MODIS starts in 2000), not 1991–2020, and are labelled
+  so. Peak NDVI shows no El Niño signal in either pilot (n = 2); it does show the RS La Niña
+  droughts (2012, 2022, 2023).
+- The stable-cropland mask comes from 2017–2023 land cover; NDVI for 2000–2016 is read over
+  pixels that may not all have been cropland then (notably in LEM, where the frontier expanded).
 - The map basemap uses OpenStreetMap tiles (fine for a demo, not for heavy traffic); set
   `VITE_BASEMAP_TILES` to another provider for production.
 - MapBiomas access is unresolved — the latest collection may require manual download or Earth

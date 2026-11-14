@@ -92,7 +92,7 @@ export function ChartFrame({
   );
 }
 
-export type LegendItem = { label: string; color: string; kind?: "dot" | "line" | "band" };
+export type LegendItem = { label: string; color: string; kind?: "dot" | "line" | "dash" | "band" };
 
 export function Legend({ items }: { items: LegendItem[] }) {
   return (
@@ -101,6 +101,11 @@ export function Legend({ items }: { items: LegendItem[] }) {
         <li key={it.label}>
           {it.kind === "line" ? (
             <span className="fp-key-line" style={{ background: it.color }} />
+          ) : it.kind === "dash" ? (
+            <span
+              className="fp-key-line"
+              style={{ background: `repeating-linear-gradient(90deg, ${it.color} 0 5px, transparent 5px 8px)` }}
+            />
           ) : it.kind === "band" ? (
             <span className="fp-key-band" style={{ background: it.color }} />
           ) : (

@@ -4,12 +4,16 @@ import {
   CompositeBars,
   EnsoOutlookChart,
   EnsoStatus,
+  ForecastPanel,
+  LandCoverTile,
   I18nProvider,
   MockBanner,
   MunicipalityMap,
   MunicipalityPicker,
   RoniHistoryChart,
   SeasonProgressChart,
+  TerrainBars,
+  VegetationPanel,
   YieldEvidence,
   clientFromEnv,
   useI18n,
@@ -197,6 +201,14 @@ function MunicipalitySections({ d }: { d: MunicipalityPayload }) {
         <SeasonProgressChart progress={d.season_progress} currentYear={d.current_crop_year} />
       </section>
 
+      {d.forecast && (
+        <section className="fp-section" aria-labelledby="s-forecast">
+          <h2 id="s-forecast">{t.forecast.title}</h2>
+          <p className="fp-lead">{t.forecast.lead}</p>
+          <ForecastPanel forecast={d.forecast} />
+        </section>
+      )}
+
       <section className="fp-section" aria-labelledby="s-evidence">
         <h2 id="s-evidence">{t.sections.evidence}</h2>
         <p className="fp-lead">{t.sections.evidenceLead}</p>
@@ -234,6 +246,20 @@ function MunicipalitySections({ d }: { d: MunicipalityPayload }) {
         <p className="fp-lead">{t.sections.yieldLead}</p>
         <YieldEvidence crops={d.yield.crops} provenance={d.provenance.yield} />
       </section>
+
+      {(d.vegetation || d.terrain || d.land_cover) && (
+        <section className="fp-section" aria-labelledby="s-veg">
+          <h2 id="s-veg">{t.vegetation.title}</h2>
+          <p className="fp-lead">{t.vegetation.lead}</p>
+          {(d.land_cover || d.terrain) && (
+            <div className="fp-grid fp-grid-2" style={{ marginBottom: 16, alignItems: "start" }}>
+              {d.land_cover && <LandCoverTile landCover={d.land_cover} />}
+              {d.terrain && <TerrainBars terrain={d.terrain} />}
+            </div>
+          )}
+          {d.vegetation && <VegetationPanel vegetation={d.vegetation} />}
+        </section>
+      )}
     </>
   );
 }

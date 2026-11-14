@@ -10,6 +10,7 @@ const COLORS = {
   baseline: "var(--fp-series-baseline)",
   band: "var(--fp-series-band)",
   analog: "var(--fp-series-analog)",
+  forecastBand: "var(--fp-series-forecast-band)",
 };
 
 /** Headline numbers at the last observed day. Pure; exported for reuse and testing. */
@@ -39,7 +40,11 @@ export function SeasonProgressChart({
   const data = progress.days.map((d) => ({
     ...d,
     band: d.baseline_p10_mm != null && d.baseline_p90_mm != null ? [d.baseline_p10_mm, d.baseline_p90_mm] : null,
+    forecastBand:
+      d.forecast_p10_mm != null && d.forecast_p90_mm != null ? [d.forecast_p10_mm, d.forecast_p90_mm] : null,
   }));
+  const lastForecast = [...data].reverse().find((d) => d.forecast_median_mm != null);
+  const hasForecast = lastForecast != null && lastForecast.date !== progress.last_observed;
   const monthTicks = data.filter((d) => d.date.slice(8, 10) === "01").map((d) => d.day);
   const monthName = new Intl.DateTimeFormat(locale, { month: "short", timeZone: "UTC" });
   const dayLabel = (day: number) => {
@@ -58,6 +63,17 @@ export function SeasonProgressChart({
           {summary.analog != null && (
             <p className="fp-lead" style={{ margin: 0 }}>
               {t.preview.analogLine(fmt(summary.analog), progress.n_analog, years)}
+            </p>
+          )}
+          {hasForecast && lastForecast && (
+            <p className="fp-lead" style={{ margin: "4px 0 0" }}>
+              {t.forecast.curveLine(
+                date(lastForecast.date),
+                fmt(lastForecast.forecast_median_mm),
+                fmt(lastForecast.forecast_p10_mm),
+                fmt(lastForecast.forecast_p90_mm),
+                fmt(lastForecast.baseline_mean_mm),
+              )}
             </p>
           )}
           {currentYear?.forecast && currentYear.enso_class && (
@@ -81,6 +97,12 @@ export function SeasonProgressChart({
               { label: `${t.preview.analog} (n=${progress.n_analog})`, color: COLORS.analog, kind: "line" },
               { label: `${t.preview.baseline} (n=${progress.n_baseline})`, color: COLORS.baseline, kind: "line" },
               { label: t.preview.band, color: COLORS.band, kind: "band" },
+              ...(hasForecast
+                ? [
+                    { label: t.forecast.curve, color: COLORS.current, kind: "dash" as const },
+                    { label: t.forecast.curveBand, color: COLORS.forecastBand, kind: "band" as const },
+                  ]
+                : []),
             ]}
           />
         }
@@ -91,15 +113,20 @@ export function SeasonProgressChart({
             { key: "analog", label: t.preview.analog, numeric: true },
             { key: "baseline", label: t.preview.baseline, numeric: true },
             { key: "band", label: t.preview.band, numeric: true },
+            ...(hasForecast ? [{ key: "fc", label: t.forecast.curve, numeric: true }] : []),
           ],
           rows: data
-            .filter((d) => d.day % 7 === 0 || d.date === progress.last_observed)
+            .filter((d) => d.day % 7 === 0 || d.date === progress.last_observed || d.date === lastForecast?.date)
             .map((d) => ({
               date: date(d.date),
               current: fmt(d.current_mm),
               analog: fmt(d.analog_mean_mm),
               baseline: fmt(d.baseline_mean_mm),
               band: `${fmt(d.baseline_p10_mm)}–${fmt(d.baseline_p90_mm)}`,
+              fc:
+                d.forecast_median_mm != null && d.current_mm == null
+                  ? `${fmt(d.forecast_median_mm)} (${fmt(d.forecast_p10_mm)}–${fmt(d.forecast_p90_mm)})`
+                  : "",
             })),
         }}
         foot={<Provenance>{t.preview.gridNote}</Provenance>}
@@ -127,6 +154,13 @@ export function SeasonProgressChart({
                     title={date(d.date)}
                     rows={[
                       ...(d.current_mm != null ? [{ label: t.preview.current, value: `${fmt(d.current_mm)} mm`, color: COLORS.current }] : []),
+                      ...(d.current_mm == null && d.forecast_median_mm != null
+                        ? [{
+                            label: t.forecast.curve,
+                            value: `${fmt(d.forecast_median_mm)} mm (${fmt(d.forecast_p10_mm)}–${fmt(d.forecast_p90_mm)})`,
+                            color: COLORS.current,
+                          }]
+                        : []),
                       { label: t.preview.analog, value: `${fmt(d.analog_mean_mm)} mm`, color: COLORS.analog },
                       { label: t.preview.baseline, value: `${fmt(d.baseline_mean_mm)} mm`, color: COLORS.baseline },
                       { label: t.preview.band, value: `${fmt(d.baseline_p10_mm)}–${fmt(d.baseline_p90_mm)} mm` },
@@ -136,6 +170,9 @@ export function SeasonProgressChart({
               }}
             />
             <Area dataKey="band" stroke="none" fill={COLORS.band} isAnimationActive={false} activeDot={false} />
+            {hasForecast && (
+              <Area dataKey="forecastBand" stroke="none" fill={COLORS.forecastBand} isAnimationActive={false} activeDot={false} />
+            )}
             <Line dataKey="baseline_mean_mm" stroke={COLORS.baseline} strokeWidth={2} dot={false} isAnimationActive={false} />
             <Line dataKey="analog_mean_mm" stroke={COLORS.analog} strokeWidth={2} dot={false} isAnimationActive={false} />
             <Line
@@ -147,6 +184,16 @@ export function SeasonProgressChart({
               isAnimationActive={false}
               activeDot={{ r: 4, stroke: CHART.surface, strokeWidth: 2 }}
             />
+            {hasForecast && (
+              <Line
+                dataKey="forecast_median_mm"
+                stroke={COLORS.current}
+                strokeWidth={2}
+                strokeDasharray="5 4"
+                dot={false}
+                isAnimationActive={false}
+              />
+            )}
           </ComposedChart>
         </ResponsiveContainer>
       </ChartFrame>

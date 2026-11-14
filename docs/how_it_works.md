@@ -126,6 +126,13 @@ SIDRA uses symbols instead of numbers in some cells: `-` means exactly zero, `..
 `X` withheld for confidentiality. We keep them as a `flag` column rather than turning them into
 fake numbers.
 
+### Optional: `fetch_meteomatics` and `fetch_planetary`
+
+Two more fetchers add the future and the view from space: **Meteomatics** forecasts (15 days, 46
+days and the seasonal outlook, with all 51 ensemble members) and **Microsoft Planetary Computer**
+satellite data (where the cropland is, how green it was each season since 2000, and its slope).
+They have their own explainer: [integrations.md](integrations.md).
+
 ## Stage 2 — Build (`build_evidence.py` + `evidence.py`)
 
 The arithmetic lives in `pipeline/evidence.py`, which does **no file or network access** — it

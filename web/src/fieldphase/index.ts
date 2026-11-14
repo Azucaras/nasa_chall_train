@@ -29,3 +29,5 @@ export { SeasonProgressChart, progressSummary } from "./components/SeasonProgres
 export { AnomalyTimeline, CompositeBars, SMALL_SAMPLE, type TimelinePoint } from "./components/Evidence";
 export { YieldEvidence } from "./components/YieldEvidence";
 export { MunicipalityMap, MunicipalityPicker, type BasemapOptions } from "./components/MunicipalityMap";
+export { ForecastPanel, SeasonOutlookChart } from "./components/ForecastPanel";
+export { LandCoverTile, TerrainBars, VegetationPanel, RELIEF_ORDER } from "./components/VegetationPanel";
