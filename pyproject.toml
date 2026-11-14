@@ -30,6 +30,14 @@ satellite = [
     "shapely>=2.0",
 ]
 
+# Microsoft Planetary Computer (MODIS NDVI, land cover, elevation). No credentials needed:
+# public STAC search + short-lived SAS tokens issued anonymously by planetarycomputer.microsoft.com.
+planetary = [
+    "pystac-client>=0.8",
+    "planetary-computer>=1.0",
+    "rasterio>=1.4",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3",

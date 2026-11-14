@@ -46,3 +46,26 @@ yield_anomaly:
 
 # Climatology for every anomaly. Same as regions.yaml meta.climatology_baseline; harvest-year labels.
 baseline_crop_years: [1991, 2020]
+
+# Vegetation (MODIS NDVI over stable cropland, from pipeline/fetch_planetary.py).
+ndvi:
+  # Summer-crop canopy peak in both pilots (soy sown Oct-Dec, full canopy Dec-Mar).
+  peak_months: [12, 1, 2, 3]
+  # A 16-day composite counts only if at least this share of the cropland pixels was cloud-free.
+  min_valid_fraction: 0.5
+  # A crop year needs at least this many usable peak-season composites (of ~8).
+  min_composites: 4
+  # MODIS starts in 2000, so the 1991-2020 climate baseline is impossible; NDVI anomalies use
+  # 2001-2020 and are labelled with that baseline everywhere (CLAUDE.md, same rule as SMAP).
+  baseline_crop_years: [2001, 2020]
+  source: >-
+    project choice. Peak months follow the summer-crop calendar in config/crops.yaml (itself
+    `suposicao`); the validity thresholds keep cloudy composites out rather than trusting a few
+    clear pixels.
+
+# Forecasts (Meteomatics, from pipeline/fetch_meteomatics.py) are compared with NASA POWER's
+# 1991-2020 climatology for the same calendar dates. Different sources: the UI says so.
+forecast:
+  heavy_day_mm: 20.0      # same R20mm threshold as rain_indices (ETCCDI)
+  wet_day_mm: 1.0         # same CDD threshold as rain_indices (ETCCDI)
+  source: ETCCDI thresholds reused; comparison window = the forecast's own dates

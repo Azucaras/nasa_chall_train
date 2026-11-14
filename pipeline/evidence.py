@@ -270,3 +270,239 @@ def season_progress(
         "n_analog": analog.shape[1],
         "analog_years": ",".join(str(y) for y in analog.columns),
     })
+
+
+# --------------------------------------------------------------------------------------------
+# Forecasts (Meteomatics) against the POWER climatology
+# --------------------------------------------------------------------------------------------
+
+
+def window_climatology(
+    daily: pd.DataFrame,
+    code: int,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    years: list[int],
+    column: str = "PRECTOTCORR",
+) -> pd.Series:
+    """Total of ``column`` over the same calendar window [start, end] in each of ``years``.
+
+    The window may cross the new year; year Y means the window that *starts* in Y. Windows with
+    any missing day are dropped. Returns a Series indexed by year.
+    """
+    d = daily[daily.code == code].set_index("date")[column]
+    out = {}
+    span = (end - start).days
+    for y in years:
+        try:
+            s = pd.Timestamp(y, start.month, start.day)
+        except ValueError:  # 29 Feb in a non-leap year
+            s = pd.Timestamp(y, start.month, 28)
+        part = d.loc[s: s + pd.Timedelta(days=span)]
+        if len(part) == span + 1 and part.notna().all():
+            out[y] = float(part.sum())
+    return pd.Series(out, dtype="float64")
+
+
+def forecast_summary(
+    fc: pd.DataFrame,
+    daily: pd.DataFrame,
+    code: int,
+    first_forecast_day: pd.Timestamp,
+    baseline: tuple[int, int],
+    analog_years: list[int],
+    heavy_day_mm: float,
+    wet_day_mm: float,
+) -> dict[str, Any]:
+    """Headline numbers for the short-range forecast from ``first_forecast_day`` onwards.
+
+    Rain total, heavy-rain days, longest dry spell, reference ET and the climatic water balance
+    (rain minus ET0) -- each next to the POWER 1991-2020 normal for the same calendar dates and the
+    strong-El-Nino analog mean. ``analog_years`` are crop years; the calendar window is taken in
+    the year it falls in for that crop year.
+    """
+    f = fc[(fc.date >= first_forecast_day)].dropna(subset=["rain"]).sort_values("date")
+    if f.empty:
+        return {}
+    start, end = f.date.min(), f.date.max()
+    base_years = list(range(baseline[0] - 1, baseline[1] + 1))
+    clim = window_climatology(daily, code, start, end, base_years)
+    # Keep only windows whose crop year is in the baseline.
+    in_base = [y for y in clim.index if baseline[0] <= _crop_year_of(pd.Timestamp(y, start.month, 1)) <= baseline[1]]
+    clim_b = clim.loc[in_base]
+    analog_start_years = [cy - 1 if start.month >= 7 else cy for cy in analog_years]
+    clim_a = window_climatology(daily, code, start, end, analog_start_years)
+    out = {
+        "start": start, "end": end, "days": int(len(f)),
+        "rain_mm": float(f.rain.sum()),
+        "heavy_days": int((f.rain >= heavy_day_mm).sum()),
+        "max_dry_spell_days": int(max_dry_spell(f.rain, wet_day_mm)),
+        "normal_rain_mm": float(clim_b.mean()) if len(clim_b) else np.nan,
+        "normal_p10_mm": float(clim_b.quantile(0.1)) if len(clim_b) else np.nan,
+        "normal_p90_mm": float(clim_b.quantile(0.9)) if len(clim_b) else np.nan,
+        "n_normal_years": int(len(clim_b)),
+        "analog_rain_mm": float(clim_a.mean()) if len(clim_a) else np.nan,
+        "n_analog_years": int(len(clim_a)),
+    }
+    if "et0" in f and f.et0.notna().any():
+        out["et0_mm"] = float(f.et0.sum())
+        out["water_balance_mm"] = out["rain_mm"] - out["et0_mm"]
+    for col in ("smi_15cm", "smi_50cm"):
+        if col in fc and fc[col].notna().any():
+            s = fc.dropna(subset=[col]).sort_values("date")
+            first = s[s.date >= first_forecast_day]
+            if not first.empty:
+                out[f"{col}_start"] = float(first[col].iloc[0])
+                out[f"{col}_end"] = float(first[col].iloc[-1])
+    return out
+
+
+def _crop_year_of(ts: pd.Timestamp, start_month: int = 7) -> int:
+    return ts.year + (1 if ts.month >= start_month else 0)
+
+
+def ensemble_progress(progress: pd.DataFrame, bridge: pd.DataFrame, members: pd.DataFrame) -> pd.DataFrame:
+    """Continue one municipality's season-to-date curve with an ensemble forecast.
+
+    ``progress``  one municipality's season_progress rows (date, current_mm, ...).
+    ``bridge``    deterministic daily rain (date, rain) for the days between the last observed
+                  POWER day and the ensemble's first day (POWER's publication lag).
+    ``members``   ensemble daily rain (date, member, rain).
+
+    Every member gets its own cumulative curve, starting from the observed total plus the bridge;
+    the median and 10th/90th percentiles are taken *across members* for each day. Adds
+    forecast_median_mm, forecast_p10_mm, forecast_p90_mm (equal on observed/bridge days).
+    """
+    out = progress.copy()
+    for col in ("forecast_median_mm", "forecast_p10_mm", "forecast_p90_mm"):
+        out[col] = np.nan
+    obs = out.dropna(subset=["current_mm"])
+    if obs.empty or members.empty:
+        return out
+    last = obs.iloc[-1]
+    ens_start = members.date.min()
+    br = bridge[(bridge.date > last.date) & (bridge.date < ens_start)].sort_values("date")
+    fixed = {last.date: last.current_mm}
+    running = last.current_mm
+    for d, r in zip(br.date, br.rain.fillna(0.0)):
+        running += r
+        fixed[d] = running
+    m = members.pivot_table(index="date", columns="member", values="rain").sort_index()
+    cum = running + m.cumsum()
+    q = cum.quantile([0.1, 0.5, 0.9], axis=1).T
+    for i, d in out.date.items():
+        if d in fixed:
+            out.loc[i, ["forecast_median_mm", "forecast_p10_mm", "forecast_p90_mm"]] = fixed[d]
+        elif d in q.index:
+            out.at[i, "forecast_p10_mm"] = q.at[d, 0.1]
+            out.at[i, "forecast_median_mm"] = q.at[d, 0.5]
+            out.at[i, "forecast_p90_mm"] = q.at[d, 0.9]
+    return out
+
+
+def monthly_outlook(
+    members: pd.DataFrame,
+    daily: pd.DataFrame,
+    code: int,
+    months: list[int],
+    baseline: tuple[int, int],
+    analog_years: list[int],
+    start_month: int = 7,
+) -> pd.DataFrame:
+    """Seasonal-forecast rain for every *complete* month it covers, summarised across members
+    (median, 10th-90th percentile of the members' monthly totals), next to the POWER 1991-2020
+    monthly normal (mean, p10, p90) and the strong-El-Nino analog mean.
+    """
+    m = members.dropna(subset=["rain"]).copy()
+    d = daily[daily.code == code].copy()
+    d["crop_year"] = crop_year(d.date, start_month)
+    d["ym"] = d.date.dt.to_period("M")
+    monthly_obs = d.groupby(["crop_year", "ym"]).PRECTOTCORR.agg(["sum", "count"]).reset_index()
+    rows = []
+    for period in pd.period_range(m.date.min(), m.date.max(), freq="M"):
+        if period.month not in months:
+            continue
+        part = m[(m.date >= period.start_time) & (m.date <= period.end_time.normalize())]
+        per_member = part.groupby("member").agg(total=("rain", "sum"), days=("rain", "size"))
+        per_member = per_member[per_member.days == period.days_in_month].total
+        if per_member.empty:
+            continue  # partial month at either end
+        same = monthly_obs[(monthly_obs.ym.dt.month == period.month) & (monthly_obs["count"] == period.days_in_month)]
+        base = same[(same.crop_year >= baseline[0]) & (same.crop_year <= baseline[1])]["sum"]
+        ana = same[same.crop_year.isin(analog_years)]["sum"]
+        rows.append({
+            "code": code, "month": period.strftime("%Y-%m"),
+            "forecast_median_mm": float(per_member.median()),
+            "forecast_p10_mm": float(per_member.quantile(0.1)),
+            "forecast_p90_mm": float(per_member.quantile(0.9)),
+            "n_members": int(len(per_member)),
+            "normal_mm": float(base.mean()) if len(base) else np.nan,
+            "normal_p10_mm": float(base.quantile(0.1)) if len(base) else np.nan,
+            "normal_p90_mm": float(base.quantile(0.9)) if len(base) else np.nan,
+            "analog_mm": float(ana.mean()) if len(ana) else np.nan,
+            "n_analog": int(len(ana)),
+        })
+    return pd.DataFrame(rows)
+
+
+# --------------------------------------------------------------------------------------------
+# Vegetation (MODIS NDVI)
+# --------------------------------------------------------------------------------------------
+
+
+def ndvi_by_crop_year(
+    comp: pd.DataFrame, peak_months: list[int], min_valid_fraction: float, min_composites: int,
+    start_month: int = 7,
+) -> pd.DataFrame:
+    """Peak-season mean cropland NDVI per (code, crop_year), from usable composites only."""
+    c = comp[comp.valid_cropland_fraction >= min_valid_fraction].copy()
+    c = c[c.date.dt.month.isin(peak_months)]
+    c["crop_year"] = crop_year(c.date, start_month)
+    g = c.groupby(["code", "crop_year"]).ndvi_cropland.agg(["mean", "count"]).reset_index()
+    g = g[g["count"] >= min_composites]
+    return g.rename(columns={"mean": "ndvi_peak", "count": "n_composites"})
+
+
+def ndvi_progress(
+    comp: pd.DataFrame,
+    code: int,
+    season_months: list[int],
+    current_cy: int,
+    baseline: tuple[int, int],
+    analog_years: list[int],
+    min_valid_fraction: float,
+    start_month: int = 7,
+) -> pd.DataFrame:
+    """Cropland NDVI per 16-day composite slot of the season: this crop year vs the baseline
+    (mean, p10, p90) and the strong-El-Nino analogs.
+
+    MODIS composites start on fixed days of year (1, 17, 33, ...), so a slot is identified by its
+    day of year; leap years shift the calendar date by one day, never the slot.
+    """
+    c = comp[(comp.code == code) & (comp.valid_cropland_fraction >= min_valid_fraction)].copy()
+    c = c[c.date.dt.month.isin(season_months)]
+    c["crop_year"] = crop_year(c.date, start_month)
+    c["doy"] = c.date.dt.dayofyear
+    # Season order: slots from the season start month onwards come first.
+    c["order"] = np.where(c.date.dt.month >= start_month, c.doy, c.doy + 366)
+    slots = sorted(c.order.unique())
+    rows = []
+    for o in slots:
+        s = c[c.order == o]
+        base = s[(s.crop_year >= baseline[0]) & (s.crop_year <= baseline[1])].ndvi_cropland
+        ana = s[s.crop_year.isin(analog_years)].ndvi_cropland
+        cur = s[s.crop_year == current_cy].ndvi_cropland
+        ref_doy = int(s.doy.iloc[0])
+        rows.append({
+            "code": code, "slot": int(o), "doy": ref_doy,
+            "label_date": (pd.Timestamp(2001 if o <= 366 else 2002, 1, 1) + pd.Timedelta(days=ref_doy - 1)).strftime("%m-%d"),
+            "current": float(cur.iloc[0]) if len(cur) else np.nan,
+            "current_date": s[s.crop_year == current_cy].date.iloc[0] if len(cur) else pd.NaT,
+            "baseline_mean": float(base.mean()) if len(base) else np.nan,
+            "baseline_p10": float(base.quantile(0.1)) if len(base) else np.nan,
+            "baseline_p90": float(base.quantile(0.9)) if len(base) else np.nan,
+            "n_baseline": int(len(base)),
+            "analog_mean": float(ana.mean()) if len(ana) else np.nan,
+            "n_analog": int(len(ana)),
+        })
+    return pd.DataFrame(rows)

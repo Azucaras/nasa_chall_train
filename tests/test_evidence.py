@@ -134,3 +134,66 @@ def test_season_progress_cumulates_from_season_start():
     assert out.loc[9, "baseline_mean_mm"] == 10.0
     assert out.n_baseline.iloc[0] == 2
     assert out.n_analog.iloc[0] == 1
+
+
+class TestForecasts:
+    def daily(self):
+        dates = pd.date_range("1990-07-01", "2026-11-11")
+        return pd.DataFrame({"code": 1, "date": dates, "PRECTOTCORR": 2.0})
+
+    def test_window_climatology_sums_the_same_calendar_window(self):
+        clim = ev.window_climatology(self.daily(), 1, pd.Timestamp("2026-11-14"), pd.Timestamp("2026-11-28"), [1991, 1992])
+        assert clim.to_dict() == {1991: 30.0, 1992: 30.0}  # 15 days x 2 mm
+
+    def test_forecast_summary_against_normal(self):
+        fc = pd.DataFrame({"date": pd.date_range("2026-11-12", periods=10),
+                           "rain": [5, 0, 0, 25, 0, 0, 0, 0, 1, 1], "et0": 4.0})
+        s = ev.forecast_summary(fc, self.daily(), 1, pd.Timestamp("2026-11-14"), (1991, 2020), [2016], 20.0, 1.0)
+        assert s["days"] == 8 and s["rain_mm"] == 27.0  # from the 14th only
+        assert s["heavy_days"] == 1 and s["max_dry_spell_days"] == 4
+        assert s["normal_rain_mm"] == 16.0  # 8 days x 2 mm
+        assert s["water_balance_mm"] == 27.0 - 32.0
+
+    def test_ensemble_progress_quantiles_across_members(self):
+        prog = pd.DataFrame({"date": pd.date_range("2026-11-09", periods=6),
+                             "current_mm": [10.0, 20.0, 30.0, np.nan, np.nan, np.nan]})
+        bridge = pd.DataFrame({"date": [pd.Timestamp("2026-11-12")], "rain": [5.0]})
+        members = pd.DataFrame({"date": list(pd.date_range("2026-11-13", periods=2)) * 3,
+                                "member": [0, 0, 1, 1, 2, 2], "rain": [0.0, 0.0, 10.0, 10.0, 20.0, 20.0]})
+        out = ev.ensemble_progress(prog, bridge, members).set_index("date")
+        assert out.loc["2026-11-11", "forecast_median_mm"] == 30.0  # joins the observed curve
+        assert out.loc["2026-11-12", "forecast_median_mm"] == 35.0  # bridge day
+        assert out.loc["2026-11-14", "forecast_median_mm"] == 55.0  # 35 + median member (10+10)
+        assert out.loc["2026-11-14", "forecast_p90_mm"] > out.loc["2026-11-14", "forecast_p10_mm"]
+
+    def test_monthly_outlook_sums_per_member_and_skips_partial_months(self):
+        dates = pd.date_range("2026-11-20", "2027-01-31")
+        members = pd.concat([pd.DataFrame({"date": dates, "member": m, "rain": float(m)}) for m in range(3)])
+        out = ev.monthly_outlook(members, self.daily(), 1, [12, 1], (1991, 2020), [2016])
+        assert out.month.tolist() == ["2026-12", "2027-01"]  # November is partial
+        dec = out.iloc[0]
+        assert dec.forecast_median_mm == 31.0  # member 1: 1 mm x 31 days
+        assert dec.n_members == 3
+        assert dec.normal_mm == 62.0  # 2 mm x 31 days
+
+
+class TestNdvi:
+    def comps(self):
+        dates = pd.to_datetime(["2015-12-19", "2016-01-01", "2016-01-17", "2016-02-02", "2016-02-18",
+                                "2016-10-15"])
+        return pd.DataFrame({"code": 1, "date": dates, "ndvi_cropland": [0.8, 0.8, 0.6, 0.8, 0.8, 0.3],
+                             "valid_cropland_fraction": [1, 1, 0.2, 1, 1, 1]})
+
+    def test_peak_ndvi_skips_cloudy_composites(self):
+        out = ev.ndvi_by_crop_year(self.comps(), [12, 1, 2, 3], 0.5, 4)
+        row = out.set_index("crop_year").loc[2016]
+        assert row.n_composites == 4 and row.ndvi_peak == pytest.approx(0.8)
+
+    def test_too_few_composites_gives_no_value(self):
+        assert ev.ndvi_by_crop_year(self.comps(), [12, 1, 2, 3], 0.5, 5).empty
+
+    def test_progress_orders_slots_from_season_start(self):
+        out = ev.ndvi_progress(self.comps(), 1, [9, 10, 11, 12, 1, 2, 3, 4], 2016, (2016, 2016), [], 0.5)
+        # October (season start side) comes before December, which comes before January/February.
+        assert [d[:2] for d in out.label_date] == ["10", "12", "01", "02", "02"]  # 17 Jan was cloudy
+        assert out.slot.is_monotonic_increasing

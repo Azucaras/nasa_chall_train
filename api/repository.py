@@ -26,7 +26,8 @@ import pyarrow.parquet as pq
 
 from pipeline.common import PROCESSED_DIR, load_config
 
-CONTRACT_VERSION = "1"
+# 1.1 adds optional blocks (forecast, vegetation, land_cover, terrain); 1.0 clients ignore them.
+CONTRACT_VERSION = "1.1"
 ENSO_CLASSES = ["el_nino_strong", "el_nino_moderate", "neutral", "la_nina"]
 
 
@@ -58,6 +59,12 @@ def frame(name: str) -> pd.DataFrame:
 
 def file_meta(name: str) -> dict[str, str]:
     return _meta(name, str(data_dir()))
+
+
+def optional(name: str) -> pd.DataFrame | None:
+    """A processed file that only exists when its optional integration ran (Meteomatics,
+    Planetary Computer); None otherwise, so the payload simply leaves that block out."""
+    return frame(name) if (data_dir() / name).exists() else None
 
 
 def clear_cache() -> None:
@@ -121,12 +128,15 @@ def meta_payload() -> dict[str, Any]:
             "rain_indices": analysis["rain_indices"]["source"].strip(),
             "crop_year_enso": analysis["crop_year_enso"]["source"].strip(),
             "yield_anomaly": analysis["yield_anomaly"]["source"].strip(),
+            "ndvi": analysis["ndvi"]["source"].strip(),
+            "forecast": analysis["forecast"]["source"].strip(),
         },
         "assumptions": assumptions,
         "datasets": {
             name: file_meta(name) for name in (
                 "enso_seasonal.parquet", "enso_current.parquet", "power_daily.parquet",
-                "pam.parquet", "regions.parquet",
+                "pam.parquet", "regions.parquet", "meteomatics_daily.parquet",
+                "ndvi_composites.parquet", "landcover_yearly.parquet", "terrain.parquet",
             ) if (data_dir() / name).exists()
         },
     })
@@ -248,8 +258,14 @@ def municipality_payload(code: int) -> dict[str, Any]:
             "n_analog": int(progress.n_analog.iloc[0]),
             "analog_years": [int(y) for y in str(progress.analog_years.iloc[0]).split(",") if y],
             "days": records(progress, ["day", "date", "current_mm", "baseline_mean_mm",
-                                       "baseline_p10_mm", "baseline_p90_mm", "analog_mean_mm"]),
+                                       "baseline_p10_mm", "baseline_p90_mm", "analog_mean_mm",
+                                       "forecast_median_mm", "forecast_p10_mm", "forecast_p90_mm"]),
+            "forecast_model": "ecmwf-vareps via Meteomatics, 51 members" if "forecast_median_mm" in progress else None,
         },
+        "forecast": _forecast_block(code),
+        "vegetation": _vegetation_block(code, comps),
+        "land_cover": _land_cover_block(code),
+        "terrain": _terrain_block(code),
         "climate": {
             "seasons": records(climate, climate_cols),
             "composites": {
@@ -268,3 +284,84 @@ def municipality_payload(code: int) -> dict[str, Any]:
             "rules": "config/analysis.yaml, config/crops.yaml",
         },
     })
+
+
+def _forecast_block(code: int) -> dict[str, Any] | None:
+    status = optional("meteomatics_status.parquet")
+    if status is None:
+        return None
+    st = status[status.code == code]
+    summ = optional("forecast_summary.parquet")
+    days = optional("forecast_days.parquet")
+    outlook = optional("season_outlook.parquet")
+    s = summ[summ.code == code] if summ is not None else None
+    return {
+        "provider": "Meteomatics",
+        "issued_utc_day": file_meta("meteomatics_status.parquet").get("fetched_utc_day"),
+        "products": records(st, ["product", "source", "status", "reason", "first_date", "last_date"]),
+        "short_range": None if s is None or s.empty else {
+            "summary": records(round_floats(s.drop(columns=["code"])))[0],
+            "days": records(round_floats(days[days.code == code].drop(columns=["code"]))) if days is not None else [],
+        },
+        "season_outlook": None if outlook is None else records(round_floats(outlook[outlook.code == code].drop(columns=["code"]), 0)),
+        "provenance": {
+            "forecast": "Meteomatics Weather API: mix (15 days), ecmwf-vareps and ecmwf-mmsf ensembles (51 members)",
+            "normals": "NASA POWER 1991-2020 for the same calendar dates -- a different source from the forecast",
+            "rules": "config/meteomatics.yaml, config/analysis.yaml (forecast)",
+        },
+    }
+
+
+def _vegetation_block(code: int, comps: pd.DataFrame) -> dict[str, Any] | None:
+    seasonal = optional("ndvi_seasonal.parquet")
+    if seasonal is None:
+        return None
+    prog = optional("ndvi_progress.parquet")
+    nd = optional("ndvi_composites.parquet")
+    s = round_floats(seasonal[seasonal.code == code], 3)
+    vc = comps[(comps.kind == "vegetation") & (comps.code == code)]
+    last = nd[nd.code == code].date.max() if nd is not None else None
+    return {
+        "baseline_crop_years": file_meta("ndvi_seasonal.parquet").get("baseline_crop_years"),
+        "last_composite": last,
+        "seasons": records(s, ["crop_year", "ndvi_peak", "n_composites", "ndvi_peak_anom",
+                               "ndvi_peak_anom_pct", "enso_class"]),
+        "composite": records(vc, ["enso_class", "n", "mean", "median", "minus_neutral", "years"]),
+        "progress": records(round_floats(prog[prog.code == code], 3), [
+            "slot", "doy", "label_date", "current", "current_date", "baseline_mean", "baseline_p10",
+            "baseline_p90", "n_baseline", "analog_mean", "n_analog"]) if prog is not None else [],
+        "provenance": {
+            "source": "MODIS MOD13Q1 v061 NDVI (Terra, 250 m, 16-day) via Microsoft Planetary Computer",
+            "mask": file_meta("ndvi_composites.parquet").get("cropland_mask"),
+            "rules": "config/planetary.yaml, config/analysis.yaml (ndvi)",
+        },
+    }
+
+
+def _land_cover_block(code: int) -> dict[str, Any] | None:
+    lc = optional("landcover_yearly.parquet")
+    if lc is None:
+        return None
+    return {
+        "years": records(round_floats(lc[lc.code == code].drop(columns=["code"]), 3)),
+        "provenance": {"source": "Impact Observatory/Esri 10 m annual land cover (io-lulc-annual-v02) via Microsoft Planetary Computer",
+                       "license": file_meta("landcover_yearly.parquet").get("license")},
+    }
+
+
+def _terrain_block(code: int) -> dict[str, Any] | None:
+    tr = optional("terrain.parquet")
+    if tr is None:
+        return None
+    t = round_floats(tr[tr.code == code], 3)
+    meta = file_meta("terrain.parquet")
+    return {
+        "by_scope": {
+            scope: {
+                "median_slope_pct": float(g.median_slope_pct.iloc[0]),
+                "classes": records(g, ["relief_class", "share"]),
+            }
+            for scope, g in t.groupby("scope", sort=False)
+        },
+        "provenance": {"source": meta.get("attribution"), "classes": meta.get("relief_source")},
+    }

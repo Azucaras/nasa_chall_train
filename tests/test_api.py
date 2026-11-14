@@ -113,7 +113,7 @@ def client(built):
 
 def test_meta(client):
     m = client.get("/api/v1/meta").json()
-    assert m["contract_version"] == "1"
+    assert m["contract_version"] == "1.1"
     assert m["mock"] is False
     assert m["current_crop_year"] == 2027
     assert m["enso_classes"] == ["el_nino_strong", "el_nino_moderate", "neutral", "la_nina"]
@@ -163,3 +163,12 @@ def test_json_is_strict(client):
 
 def test_unknown_municipality_is_404(client):
     assert client.get("/api/v1/municipalities/1234567").status_code == 404
+
+
+def test_optional_integrations_are_null_when_not_run(client):
+    """No Meteomatics / Planetary Computer outputs in the fixture -> those blocks are null, and
+    everything else still works (a team without those accounts gets a valid payload)."""
+    r = client.get(f"/api/v1/municipalities/{CODE}").json()
+    for block in ("forecast", "vegetation", "land_cover", "terrain"):
+        assert r[block] is None
+    assert r["season_progress"]["forecast_model"] is None

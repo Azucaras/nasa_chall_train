@@ -9,11 +9,23 @@ Outputs (data/processed/):
     yield_anomalies.parquet    detrended PAM yield anomalies per municipality x crop x year
     composites.parquet         mean anomaly by ENSO class, with n and the years behind it
     season_progress.parquet    cumulative rain this season vs climatology vs strong-El-Nino years
+                               (+ forecast_mm continuing it, when Meteomatics data is present)
+
+Optional, built only when their inputs exist:
+    forecast_summary.parquet   15-day Meteomatics forecast vs POWER normal for the same dates
+    forecast_days.parquet      the forecast day by day (rain, ET0, soil moisture index, ...)
+    season_outlook.parquet     seasonal forecast by month vs normal and strong-El-Nino months
+    ndvi_seasonal.parquet      peak-season cropland NDVI per crop year, 2001-2020 anomalies
+    ndvi_progress.parquet      this season's NDVI per 16-day slot vs normal and analogs
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 
 from pipeline import evidence as ev
 from pipeline.common import (
@@ -45,6 +57,11 @@ COMPOSITE_METRICS = {
     "season_gwetroot_anom": "0-1",
     "season_tmax_c_anom": "C",
 }
+
+
+def pq_meta(path: Path) -> dict[str, str]:
+    raw = pq.read_schema(path).metadata or {}
+    return {k.decode(): v.decode() for k, v in raw.items() if not k.startswith(b"pandas")}
 
 
 def _read(name: str) -> pd.DataFrame:
@@ -161,6 +178,80 @@ def main() -> None:
         "baseline_crop_years": f"{baseline[0]}-{baseline[1]}",
         "current_crop_year": str(current_cy),
     }
+
+    # ---- Optional: Meteomatics forecasts -----------------------------------------------------
+    fc_path = PROCESSED_DIR / "meteomatics_daily.parquet"
+    if fc_path.exists():
+        fc_all = pd.read_parquet(fc_path)
+        ens_path = PROCESSED_DIR / "meteomatics_ensemble.parquet"
+        ens_all = pd.read_parquet(ens_path) if ens_path.exists() else pd.DataFrame(
+            columns=["code", "product", "date", "member", "rain"])
+        fc_day = pd.Timestamp(pq_meta(fc_path).get("fetched_utc_day", str(daily.date.max().date())))
+        fcfg = cfg["forecast"]
+        summaries, days_out, outlook_rows, extended_progress = [], [], [], []
+        for code in regions.code:
+            code = int(code)
+            short = fc_all[(fc_all.code == code) & (fc_all["product"] == "short_range")].dropna(axis=1, how="all")
+            ext = ens_all[(ens_all.code == code) & (ens_all["product"] == "extended")]
+            seas = ens_all[(ens_all.code == code) & (ens_all["product"] == "seasonal")]
+            p = progress[progress.code == code]
+            last_obs = p.dropna(subset=["current_mm"]).date.max()
+            if not short.empty:
+                s = ev.forecast_summary(short, daily, code, fc_day, baseline, strong_years,
+                                        fcfg["heavy_day_mm"], fcfg["wet_day_mm"])
+                summaries.append({"code": code, "issued_utc_day": fc_day, **s})
+                d = short.drop(columns=["product", "source"]).copy()
+                d["kind"] = np.where(d.date < fc_day, "recent", "forecast")
+                days_out.append(d[d.date > last_obs])  # days POWER has not published yet, then forecast
+            if not ext.empty:
+                bridge = short[["date", "rain"]] if not short.empty else pd.DataFrame(columns=["date", "rain"])
+                p = ev.ensemble_progress(p, bridge, ext[["date", "member", "rain"]])
+            if not seas.empty:
+                outlook_rows.append(ev.monthly_outlook(seas[["date", "member", "rain"]], daily, code,
+                                                       season_months, baseline, strong_years, start_month))
+            extended_progress.append(p)
+        progress = pd.concat(extended_progress, ignore_index=True)
+        fmeta = {**meta, "source": "Meteomatics Weather API; normals from NASA POWER 1991-2020",
+                 "issued_utc_day": str(fc_day.date())}
+        if summaries:
+            write_parquet(pd.DataFrame(summaries), "forecast_summary.parquet", fmeta)
+            write_parquet(pd.concat(days_out, ignore_index=True), "forecast_days.parquet", fmeta)
+        if outlook_rows:
+            write_parquet(pd.concat(outlook_rows, ignore_index=True), "season_outlook.parquet",
+                          {**fmeta, "model": "ecmwf-mmsf via Meteomatics, all 51 members"})
+        log.info("forecasts: %d summaries, %d outlook rows", len(summaries), sum(len(o) for o in outlook_rows))
+    else:
+        log.info("no meteomatics_daily.parquet: forecast products skipped")
+
+    # ---- Optional: MODIS NDVI (Planetary Computer) --------------------------------------------
+    nd_path = PROCESSED_DIR / "ndvi_composites.parquet"
+    if nd_path.exists():
+        nd = pd.read_parquet(nd_path)
+        ncfg = cfg["ndvi"]
+        nbase = tuple(ncfg["baseline_crop_years"])
+        ndvi_cy = ev.ndvi_by_crop_year(nd, ncfg["peak_months"], ncfg["min_valid_fraction"],
+                                       ncfg["min_composites"], start_month)
+        ndvi_cy = ev.add_anomalies(ndvi_cy, ["ndvi_peak"], nbase)
+        means = ndvi_cy[(ndvi_cy.crop_year >= nbase[0]) & (ndvi_cy.crop_year <= nbase[1])].groupby("code").ndvi_peak.mean()
+        ndvi_cy["ndvi_peak_anom_pct"] = 100 * ndvi_cy.ndvi_peak_anom / ndvi_cy.code.map(means)
+        ndvi_cy = ndvi_cy.merge(cy_enso[["crop_year", "enso_class", "forecast"]], on="crop_year", how="left")
+        obs_nd = ndvi_cy[~ndvi_cy.forecast.fillna(False).astype(bool)]
+        vc = ev.composite(obs_nd, "ndvi_peak_anom_pct", ["code"])
+        composites = pd.concat([composites, vc.assign(kind="vegetation", metric="ndvi_peak_anom_pct", unit="%",
+                                                     crop_code=None, crop=None)], ignore_index=True)
+        nprog = pd.concat([
+            ev.ndvi_progress(nd, int(code), season_months, current_cy, nbase, strong_years,
+                             ncfg["min_valid_fraction"], start_month)
+            for code in regions.code
+        ], ignore_index=True)
+        vmeta = {**meta, "baseline_crop_years": f"{nbase[0]}-{nbase[1]}",
+                 "source": "MODIS MOD13Q1 v061 NDVI via Microsoft Planetary Computer, stable cropland"}
+        write_parquet(ndvi_cy, "ndvi_seasonal.parquet", vmeta)
+        write_parquet(nprog, "ndvi_progress.parquet", vmeta)
+        log.info("NDVI: %d crop-year values, %d progress slots", len(ndvi_cy), len(nprog))
+    else:
+        log.info("no ndvi_composites.parquet: vegetation products skipped")
+
     write_parquet(cy_enso, "crop_year_enso.parquet", meta)
     write_parquet(climate, "climate_seasonal.parquet", {**meta, "source": "NASA POWER PRECTOTCORR, GWETROOT, T2M_MAX"})
     write_parquet(yields, "yield_anomalies.parquet", {**meta, "source": "IBGE PAM tables 1612, 839"})
