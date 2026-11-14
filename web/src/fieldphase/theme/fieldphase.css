@@ -33,6 +33,18 @@
   --fp-series-band: rgba(137, 135, 129, 0.16);
   --fp-series-analog: #e34948;
   --fp-series-forecast-band: rgba(42, 120, 214, 0.16);
+  /* Crop identity (fixed per crop): reference categorical slots, light steps. */
+  --fp-crop-soja: #008300;
+  --fp-crop-milho: #eda100;
+  --fp-crop-ink-milho: #0b0b0b;
+  --fp-crop-trigo: #eb6834;
+  --fp-crop-sorgo: #eb6834;
+  --fp-crop-aveia: #6250d6;
+  --fp-crop-algodao: #6250d6;
+  --fp-crop-aveia-cobertura: #1baf7a;
+  --fp-crop-milheto-cobertura: #1baf7a;
+  --fp-crop-canola: #e87ba4;
+  --fp-crop-ink-canola: #0b0b0b;
   /* Ordinal ramp (one hue; reference blue steps 250..700 on light). */
   --fp-ordinal-1: #86b6ef;
   --fp-ordinal-2: #5598e7;
@@ -78,7 +90,27 @@
     --fp-series-band: rgba(195, 194, 183, 0.12);
     --fp-series-analog: #e66767;
     --fp-series-forecast-band: rgba(57, 135, 229, 0.2);
-    --fp-ordinal-1: #b7d3f6;
+    --fp-crop-soja: #0ca30c;
+    --fp-crop-milho: #c98500;
+    --fp-crop-trigo: #d95926;
+    --fp-crop-sorgo: #d95926;
+    --fp-crop-aveia: #9085e9;
+    --fp-crop-algodao: #9085e9;
+    --fp-crop-aveia-cobertura: #199e70;
+    --fp-crop-milheto-cobertura: #199e70;
+    --fp-crop-canola: #d55181;
+    --fp-crop-ink-canola: #fff;
+  --fp-crop-soja: #0ca30c;
+  --fp-crop-milho: #c98500;
+  --fp-crop-trigo: #d95926;
+  --fp-crop-sorgo: #d95926;
+  --fp-crop-aveia: #9085e9;
+  --fp-crop-algodao: #9085e9;
+  --fp-crop-aveia-cobertura: #199e70;
+  --fp-crop-milheto-cobertura: #199e70;
+  --fp-crop-canola: #d55181;
+  --fp-crop-ink-canola: #fff;
+  --fp-ordinal-1: #b7d3f6;
     --fp-ordinal-2: #6da7ec;
     --fp-ordinal-3: #3987e5;
     --fp-ordinal-4: #256abf;
@@ -576,6 +608,152 @@
 .fp-segbar-part[data-active] {
   outline: 2px solid var(--fp-ink);
   outline-offset: 1px;
+}
+
+/* Rotation advisor. */
+.fp-rot-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: 16px 32px;
+  margin-bottom: 4px;
+}
+.fp-rot-weight {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.fp-rot-weight > span {
+  font-size: 14px;
+}
+.fp-rot-list {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0 0;
+  display: grid;
+  gap: 12px;
+}
+.fp-rot-card[data-unranked] {
+  opacity: 0.85;
+  border-style: dashed;
+}
+.fp-rot-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.fp-rot-head h3 {
+  flex: 1;
+  font-size: 16px;
+}
+.fp-rot-rank {
+  font-weight: 700;
+  color: var(--fp-ink-2);
+  min-width: 2.2em;
+}
+.fp-rot-total {
+  font-size: 28px;
+  font-weight: 600;
+  text-align: right;
+  line-height: 1;
+}
+.fp-rot-total small {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--fp-muted);
+}
+.fp-rot-bars {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 12px;
+}
+.fp-rot-bar {
+  display: grid;
+  grid-template-columns: 10.5em minmax(60px, 1fr) 2.5em minmax(0, 1.6fr);
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+}
+.fp-rot-bar[data-off] {
+  opacity: 0.45;
+}
+.fp-rot-bar-label {
+  color: var(--fp-ink-2);
+}
+.fp-rot-bar-track {
+  height: 10px;
+  background: var(--fp-surface-2);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.fp-rot-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--fp-accent);
+  border-radius: 0 5px 5px 0;
+}
+.fp-rot-bar-score {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.fp-rot-bar-raw {
+  color: var(--fp-muted);
+}
+.fp-rot-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 2px;
+  margin-top: 4px;
+}
+.fp-rot-cal-fill {
+  height: 26px;
+  display: flex;
+  gap: 1px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.fp-rot-cal-fill span {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+}
+.fp-rot-cal-fill[data-bare] {
+  background: repeating-linear-gradient(135deg, var(--fp-surface-2) 0 4px, var(--fp-grid) 4px 6px);
+  border: 1px dashed var(--fp-axis);
+}
+.fp-rot-cal-month {
+  text-align: center;
+  font-size: 11px;
+  color: var(--fp-muted);
+  margin-top: 2px;
+}
+.fp-rot-cal-heavy {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fp-warning-ink);
+}
+@media (max-width: 560px) {
+  .fp-rot-bar {
+    grid-template-columns: minmax(0, 1fr) 2.5em;
+    row-gap: 2px;
+  }
+  .fp-rot-bar-label {
+    grid-column: 1 / -1;
+  }
+  .fp-rot-bar-raw {
+    grid-column: 1 / -1;
+  }
+  .fp-rot-cal-fill span {
+    font-size: 9px;
+  }
 }
 
 /* Recharts text picks up the kit's ink tokens. */

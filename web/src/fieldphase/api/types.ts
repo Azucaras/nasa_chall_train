@@ -1,6 +1,6 @@
 /**
- * Field Phase data contract, version 1.1 (1.1 adds the optional forecast, vegetation, land_cover
- * and terrain blocks; each is null when its integration has not been run).
+ * Field Phase data contract, version 1.2 (1.1 adds the optional forecast, vegetation, land_cover
+ * and terrain blocks; 1.2 adds `rotations`; each is null when its inputs have not been built).
  *
  * Mirrors api/repository.py exactly. Every payload is plain JSON: numbers may be null (never NaN),
  * dates are ISO strings, categorical fields are stable codes and never translated text.
@@ -271,6 +271,70 @@ export interface LandCoverBlock {
 
 export type ReliefClass = "plano" | "suave_ondulado" | "ondulado" | "forte_ondulado" | "montanhoso" | "escarpado";
 
+export type Component = "soil" | "water" | "income";
+export type Weights = Record<Component, number>;
+
+export interface CalendarEntry {
+  crop: string;
+  stage: "ini" | "dev" | "mid" | "end";
+}
+
+export interface RotationResult {
+  id: string;
+  crops: string[];
+  windows: Record<string, { sow: number; harvest: number }>;
+  /** Keys are calendar months "1".."12". */
+  calendar: Record<string, CalendarEntry[]>;
+  soil: {
+    value: number | null;
+    score: number | null;
+    bare_months?: number[];
+    heavy_days_by_bare_month?: Record<string, number>;
+    reason?: string;
+  };
+  water: {
+    value: number | null;
+    score: number | null;
+    demand_mm?: number;
+    by_month?: { month: number; kc: number; et0_mm: number; etc_mm: number; rain_mm: number; deficit_mm: number }[];
+    reason?: string;
+  };
+  income: {
+    value: number | null;
+    score: number | null;
+    revenue_normal?: number;
+    revenue_in_class?: number;
+    min_n_years?: number;
+    items: { crop: string; cover_crop?: boolean; revenue_per_ha?: number | null; yield_anomaly_pct?: number | null; n_years?: number }[];
+    reason?: string;
+  };
+  /** Total and rank for the payload's default weights; the UI recomputes them for its own. */
+  total: number | null;
+  rank: number | null;
+}
+
+export interface MonthClimate {
+  month: number;
+  rain_mm: number | null;
+  heavy_days: number | null;
+  et0_mm: number | null;
+  n_years: number;
+  n_years_et0: number;
+}
+
+export interface RotationsBlock {
+  current_class: EnsoClass | null;
+  current_class_is_forecast: boolean;
+  default_weights: Weights;
+  formula: string;
+  components: Record<Component, { metric: string; unit: string; better: "lower" | "higher" }>;
+  crops: Record<string, { name_pt: string; name_en: string; cover_crop?: boolean | null }>;
+  by_class: Partial<Record<EnsoClass, RotationResult[]>>;
+  climate_by_class: Partial<Record<EnsoClass | "all", MonthClimate[]>>;
+  assumptions: { scope: string; region: string; source: string }[];
+  provenance: Record<string, string>;
+}
+
 export interface TerrainBlock {
   by_scope: Record<"municipality" | "cropland", { median_slope_pct: number; classes: { relief_class: ReliefClass; share: number }[] }>;
   provenance: Record<string, string>;
@@ -292,6 +356,7 @@ export interface MunicipalityPayload {
   vegetation?: VegetationBlock | null;
   land_cover?: LandCoverBlock | null;
   terrain?: TerrainBlock | null;
+  rotations?: RotationsBlock | null;
   climate: {
     seasons: ClimateSeason[];
     composites: Record<string, { unit: string; by_class: CompositeRow[] }>;

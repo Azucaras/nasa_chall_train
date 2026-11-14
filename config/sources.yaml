@@ -173,3 +173,21 @@ sources:
     use: reference
     probe: https://m2m.cr.usgs.gov/api/api/json/stable/
     verified: API alive (JSON 404 on the bare base; every call needs an ERS login + M2M access request)
+  - id: fao56
+    name: FAO-56 Crop evapotranspiration (Allen et al., 1998) -- Kc table and Penman-Monteith ET0
+    coverage: global
+    access: file
+    auth: none
+    cadence: static
+    use: reference
+    probe: https://www.fao.org/4/x0490e/x0490e0b.htm
+    verified: ok (www.fao.org/3/... redirects to /4/...)
+  - id: conab_calendar
+    name: CONAB Calendario de Plantio e Colheita de Graos no Brasil (2022)
+    coverage: brazil
+    access: file
+    auth: none
+    cadence: occasional
+    use: reference
+    probe: https://antigo.conab.gov.br/outras-publicacoes/item/download/45710_77f0a5ee35e765e2248999f4c61e70c8
+    verified: TLS certificate does not match antigo.conab.gov.br from the cloud runner; calendars stay suposicao

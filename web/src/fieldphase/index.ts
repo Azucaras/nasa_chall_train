@@ -31,3 +31,5 @@ export { YieldEvidence } from "./components/YieldEvidence";
 export { MunicipalityMap, MunicipalityPicker, type BasemapOptions } from "./components/MunicipalityMap";
 export { ForecastPanel, SeasonOutlookChart } from "./components/ForecastPanel";
 export { LandCoverTile, TerrainBars, VegetationPanel, RELIEF_ORDER } from "./components/VegetationPanel";
+export { RotationPanel, cropColor } from "./components/RotationPanel";
+export { COMPONENTS, rankRotations, weightedTotal, type Ranked } from "./scoring";

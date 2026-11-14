@@ -11,6 +11,7 @@ import {
   MunicipalityMap,
   MunicipalityPicker,
   RoniHistoryChart,
+  RotationPanel,
   SeasonProgressChart,
   TerrainBars,
   VegetationPanel,
@@ -164,11 +165,6 @@ function Page({
         {detail.status === "ready" && <MunicipalitySections d={detail.data} />}
         {detail.status === "loading" && selected != null && <p className="fp-note">{t.app.loading}</p>}
 
-        <section className="fp-section" aria-labelledby="s-rot">
-          <h2 id="s-rot">{t.sections.rotations}</h2>
-          <div className="fp-card fp-todo">{t.sections.rotationsTodo}</div>
-        </section>
-
         {meta.status === "ready" && <Footer meta={meta.data} />}
       </div>
     </>
@@ -208,6 +204,17 @@ function MunicipalitySections({ d }: { d: MunicipalityPayload }) {
           <ForecastPanel forecast={d.forecast} />
         </section>
       )}
+
+      <section className="fp-section" aria-labelledby="s-rot">
+        <h2 id="s-rot">
+          {t.sections.rotations} — {name}
+        </h2>
+        {d.rotations ? (
+          <RotationPanel rotations={d.rotations} regionLabel={d.municipality.region_name} />
+        ) : (
+          <div className="fp-card fp-todo">{t.sections.rotationsTodo}</div>
+        )}
+      </section>
 
       <section className="fp-section" aria-labelledby="s-evidence">
         <h2 id="s-evidence">{t.sections.evidence}</h2>
