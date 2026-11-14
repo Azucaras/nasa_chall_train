@@ -50,6 +50,9 @@ def built(tmp_path_factory):
                           "GWETROOT": 0.5, "T2M_MAX": 28.0, "T2M_MIN": 16.0, "RH2M": 70.0,
                           "WS2M": 2.0, "ALLSKY_SFC_SW_DWN": 20.0, "elevation_m": 400.0})
     _write(daily, d / "power_daily.parquet")
+    _write(pd.DataFrame([{"code": CODE, "top_cm": t, "bottom_cm": b, "fc": 0.30, "wp": 0.18}
+                         for t, b in ((0, 5), (5, 15), (15, 30), (30, 60), (60, 100), (100, 200))]),
+           d / "soil_profile.parquet")
 
     years = np.arange(1974, 2026)
     pam = pd.concat([
@@ -208,3 +211,10 @@ def test_rotation_endpoint_reranks_with_weights(client):
 
 def test_rotation_endpoint_404(client):
     assert client.get(f"/api/v1/municipalities/{CODE}/rotations?enso_class=nope").status_code == 404
+
+
+def test_water_comes_from_the_soil_water_balance(client):
+    r = client.get(f"/api/v1/municipalities/{CODE}").json()["rotations"]
+    w = {x["id"]: x["water"] for x in r["by_class"]["neutral"]}["soja_trigo"]
+    assert w["model"] == "FAO-56 daily soil water balance"
+    assert w["n_years"] > 0 and w["value"] >= 0 and w["stress_days"] >= 0

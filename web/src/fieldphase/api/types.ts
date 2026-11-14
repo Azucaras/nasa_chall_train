@@ -296,7 +296,12 @@ export interface RotationResult {
     value: number | null;
     score: number | null;
     demand_mm?: number;
-    by_month?: { month: number; kc: number; et0_mm: number; etc_mm: number; rain_mm: number; deficit_mm: number }[];
+    stress_days?: number;
+    n_years?: number;
+    /** Total available water (mm) in each crop's root zone. */
+    taw_mm?: Record<string, number>;
+    model?: string;
+    by_month?: { month: number; deficit_mm: number }[];
     reason?: string;
   };
   income: {
@@ -328,7 +333,7 @@ export interface RotationsBlock {
   default_weights: Weights;
   formula: string;
   components: Record<Component, { metric: string; unit: string; better: "lower" | "higher" }>;
-  crops: Record<string, { name_pt: string; name_en: string; cover_crop?: boolean | null }>;
+  crops: Record<string, { name_pt: string; name_en: string; abbr?: string | null; cover_crop?: boolean | null }>;
   by_class: Partial<Record<EnsoClass, RotationResult[]>>;
   climate_by_class: Partial<Record<EnsoClass | "all", MonthClimate[]>>;
   assumptions: { scope: string; region: string; source: string }[];

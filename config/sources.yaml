@@ -161,8 +161,8 @@ sources:
     access: api
     auth: none
     cadence: static
-    use: phase3
-    probe: https://rest.isric.org/soilgrids/v2.0/properties/query?lon=-46.02&lat=-12.20&property=clay&depth=0-5cm&value=mean
+    use: core
+    probe: https://rest.isric.org/soilgrids/v2.0/properties/query?lon=-46.02&lat=-12.20&property=wv0033&depth=0-5cm&value=mean
     verified: ok (slow, first call timed out once)
   - id: usgs_m2m
     name: USGS EarthExplorer Machine-to-Machine API (Landsat, SRTM)

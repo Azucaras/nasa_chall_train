@@ -226,8 +226,9 @@ of **448 mm** — already above the 90th percentile — while LEM has had **93 m
 ## Stage 2b — Rotation scoring (`build_scoring.py` + `scoring.py`)
 
 The evidence feeds the advisor. For every candidate rotation and every ENSO class, three measured
-quantities — heavy-rain days on bare soil, crop water deficit (FAO-56 Kc × ET0 minus rain), and the
-revenue change in that kind of year — become 0–100 scores, and the farmer's weights combine them.
+quantities — heavy-rain days on bare soil, transpiration lost to water stress in a daily FAO-56 soil
+water balance (SoilGrids soil, FAO-56 roots), and the revenue change in that kind of year — become
+0–100 scores, and the farmer's weights combine them.
 Full method, sources and results: [scoring.md](scoring.md).
 
 ## Stage 3 — Serve

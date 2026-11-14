@@ -232,14 +232,16 @@ const ptBR = {
     total: "Pontuação",
     soilValue: (d: string) => `${d} dias de chuva forte com solo descoberto/ano`,
     soilCovered: "solo coberto o ano todo",
-    waterValue: (mm: string) => `déficit de água ${mm} mm/ano`,
+    waterValue: (mm: string, days: string) => `${mm} mm de transpiração perdida · ${days} dias de estresse/ano`,
     incomeValue: (pct: string) => `receita ${pct} neste tipo de ano`,
     soilWhy: (months: string, d: string, cls: string) =>
       `Solo descoberto em ${months}. Nesses meses, anos de ${cls} trazem em média ${d} dias de chuva ≥20 mm — risco de erosão.`,
     soilWhyCovered: "Nenhum mês de solo descoberto: cultura ou palhada protege o solo o ano todo.",
-    waterWhy: (mm: string, month: string, demand: string) =>
-      `Falta ${mm} mm de chuva para o consumo das culturas (${demand} mm/ano), sobretudo em ${month}.`,
-    waterWhyNone: (demand: string) => `A chuva média cobre o consumo das culturas (${demand} mm/ano) em todos os meses.`,
+    waterWhy: (mm: string, days: string, month: string, demand: string, n: number) =>
+      `Pelo balanço diário de água no solo, as culturas deixam de transpirar ${mm} mm por ano (${days} dias de estresse), sobretudo em ${month} — de ${demand} mm de consumo. Média de ${n} anos.`,
+    waterWhyNone: (demand: string, n: number) =>
+      `O solo guarda água suficiente: praticamente sem estresse hídrico (consumo de ${demand} mm/ano; média de ${n} anos).`,
+    soilStore: (parts: string) => `Água disponível na zona de raízes (SoilGrids): ${parts}.`,
     incomeWhy: (parts: string, cls: string) => `Em anos de ${cls}: ${parts}.`,
     incomePart: (crop: string, pct: string, n: number) => `${crop} ${pct} (n=${n})`,
     coverCrop: "cobertura, sem venda",
@@ -264,7 +266,7 @@ const ptBR = {
     notes: {
       relative: "As notas comparam só estas candidatas: 100 = melhor delas naquela prioridade, 0 = pior.",
       water:
-        "Água: balanço mensal (consumo Kc × ET0 menos chuva) sem armazenamento no solo — penaliza culturas que terminam o ciclo na seca, como algodão e sorgo safrinha.",
+        "Água: balanço hídrico diário do solo (FAO-56): a chuva fica guardada na zona de raízes; quando o solo seca além do limite de cada cultura, ela transpira menos. Capacidade do solo: SoilGrids (modelo, 250 m); profundidade de raízes: FAO-56 Tabela 22.",
       income: "Renda: receita bruta (IBGE, R$ nominais dos últimos 5 anos) ajustada pela variação de produtividade nesse tipo de ano; custos não entram.",
       kc: "Coeficientes de cultura (Kc): FAO-56, Tabela 12.",
     },
@@ -474,13 +476,15 @@ const en: Strings = {
     total: "Score",
     soilValue: (d) => `${d} heavy-rain days on bare soil/yr`,
     soilCovered: "soil covered all year",
-    waterValue: (mm) => `water deficit ${mm} mm/yr`,
+    waterValue: (mm, days) => `${mm} mm of transpiration lost · ${days} stress days/yr`,
     incomeValue: (pct) => `revenue ${pct} in this kind of year`,
     soilWhy: (months, d, cls) =>
       `Bare soil in ${months}. In those months, ${cls} years bring on average ${d} days of ≥20 mm rain — erosion risk.`,
     soilWhyCovered: "No bare months: a crop or its residue protects the soil all year.",
-    waterWhy: (mm, month, demand) => `Rain falls ${mm} mm short of crop water use (${demand} mm/yr), mostly in ${month}.`,
-    waterWhyNone: (demand) => `Average rain covers crop water use (${demand} mm/yr) in every month.`,
+    waterWhy: (mm, days, month, demand, n) =>
+      `In a daily soil water balance the crops lose ${mm} mm of transpiration a year (${days} stress days), mostly in ${month} — out of ${demand} mm of water use. Mean of ${n} years.`,
+    waterWhyNone: (demand, n) => `The soil stores enough water: practically no water stress (water use ${demand} mm/yr; mean of ${n} years).`,
+    soilStore: (parts) => `Water available in the root zone (SoilGrids): ${parts}.`,
     incomeWhy: (parts, cls) => `In ${cls} years: ${parts}.`,
     incomePart: (crop, pct, n) => `${crop} ${pct} (n=${n})`,
     coverCrop: "cover crop, not sold",
@@ -505,7 +509,7 @@ const en: Strings = {
     notes: {
       relative: "Scores compare these candidates only: 100 = best of them on that priority, 0 = worst.",
       water:
-        "Water: monthly balance (use Kc × ET0 minus rain) with no soil storage — penalises crops that finish in the dry season, such as cotton and second-crop sorghum.",
+        "Water: a daily soil water balance (FAO-56): rain is stored in the root zone; when the soil dries past each crop's limit, it transpires less. Soil capacity: SoilGrids (modelled, 250 m); rooting depth: FAO-56 Table 22.",
       income: "Income: gross revenue (IBGE, nominal R$, last 5 years) adjusted by the yield change in that kind of year; costs are not included.",
       kc: "Crop coefficients (Kc): FAO-56, Table 12.",
     },

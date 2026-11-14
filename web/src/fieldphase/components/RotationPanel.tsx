@@ -105,7 +105,7 @@ function RotationCard({
 
   const raw: Record<Component, string> = {
     soil: r.soil.value == null ? "—" : r.soil.value === 0 ? t.rotations.soilCovered : t.rotations.soilValue(fmt(r.soil.value, 1)),
-    water: r.water.value == null ? "—" : t.rotations.waterValue(fmt(r.water.value)),
+    water: r.water.value == null ? "—" : t.rotations.waterValue(fmt(r.water.value), fmt(r.water.stress_days ?? null)),
     income: r.income.value == null ? "—" : t.rotations.incomeValue(signed(r.income.value, "%", 1)),
   };
 
@@ -144,7 +144,7 @@ function RotationCard({
         ))}
       </div>
 
-      <CalendarStrip r={r} climate={climate} cropName={cropName} />
+      <CalendarStrip r={r} climate={climate} cropName={cropName} abbr={(id) => rotations.crops[id]?.abbr ?? cropName(id).slice(0, 2)} />
 
       <ul className="fp-explain">
         {why.map((w, i) => (
@@ -161,7 +161,17 @@ function RotationCard({
   );
 }
 
-function CalendarStrip({ r, climate, cropName }: { r: RotationResult; climate: MonthClimate[]; cropName: (id: string) => string }) {
+function CalendarStrip({
+  r,
+  climate,
+  cropName,
+  abbr,
+}: {
+  r: RotationResult;
+  climate: MonthClimate[];
+  cropName: (id: string) => string;
+  abbr: (id: string) => string;
+}) {
   const { t, fmt } = useI18n();
   const heavy = new Map(climate.map((c) => [c.month, c.heavy_days]));
   return (
@@ -179,7 +189,7 @@ function CalendarStrip({ r, climate, cropName }: { r: RotationResult; climate: M
               <div className="fp-rot-cal-fill" data-bare={!entries.length || undefined}>
                 {entries.map((e) => (
                   <span key={e.crop} style={{ background: cropColor(e.crop), color: `var(--fp-crop-ink-${e.crop.replace(/_/g, "-")}, #fff)` }}>
-                    {cropName(e.crop).slice(0, 2)}
+                    {abbr(e.crop)}
                   </span>
                 ))}
               </div>
@@ -255,11 +265,16 @@ function whyLines(
   }
   if (r.water.value != null) {
     const worst = [...(r.water.by_month ?? [])].sort((a, b) => b.deficit_mm - a.deficit_mm)[0];
+    const n = r.water.n_years ?? 0;
     out.push(
-      r.water.value > 0.5 && worst
-        ? t.rotations.waterWhy(fmt(r.water.value), monthName(worst.month), fmt(r.water.demand_mm ?? null))
-        : t.rotations.waterWhyNone(fmt(r.water.demand_mm ?? null)),
+      r.water.value >= 1 && worst
+        ? t.rotations.waterWhy(fmt(r.water.value), fmt(r.water.stress_days ?? null), monthName(worst.month),
+            fmt(r.water.demand_mm ?? null), n)
+        : t.rotations.waterWhyNone(fmt(r.water.demand_mm ?? null), n),
     );
+    if (r.water.taw_mm) {
+      out.push(t.rotations.soilStore(Object.entries(r.water.taw_mm).map(([c, v]) => `${cropName(c)} ${fmt(v)} mm`).join(", ")));
+    }
   }
   const parts = r.income.items
     .map((i) =>

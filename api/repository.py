@@ -328,10 +328,10 @@ def rotations_block(code: int, current: pd.DataFrame | None = None) -> dict[str,
                    "score_i = min-max 0-100 across candidates (100 = best)",
         "components": {
             "soil": {"metric": "heavy_rain_days_on_bare_soil", "unit": "days/yr", "better": "lower"},
-            "water": {"metric": "crop_water_deficit", "unit": "mm/yr", "better": "lower"},
+            "water": {"metric": "transpiration_deficit_daily_soil_water_balance", "unit": "mm/yr", "better": "lower"},
             "income": {"metric": "revenue_change_in_class", "unit": "%", "better": "higher"},
         },
-        "crops": {cid: {k: cfg["crops"][cid].get(k) for k in ("name_pt", "name_en", "cover_crop")} for cid in crop_ids},
+        "crops": {cid: {k: cfg["crops"][cid].get(k) for k in ("name_pt", "name_en", "abbr", "cover_crop")} for cid in crop_ids},
         "by_class": by_class,
         "climate_by_class": climate,
         "assumptions": [{"scope": "calendar", "region": region, "source": cal_source}] if cal_source == "suposicao" else [],
@@ -339,9 +339,13 @@ def rotations_block(code: int, current: pd.DataFrame | None = None) -> dict[str,
             "kc": cfg["kc_source"],
             "calendar": f"config/rotations.yaml calendars.{region} (source: {cal_source})",
             "climate": file_meta("rotation_scores.parquet").get("climate_source"),
+            "soil": file_meta("rotation_scores.parquet").get("soil_source"),
+            "roots": file_meta("rotation_scores.parquet").get("root_source"),
+            "water_model": file_meta("rotation_scores.parquet").get("water_model"),
             "revenue": file_meta("rotation_scores.parquet").get("revenue_source"),
             "yield_anomalies": "IBGE PAM yield anomalies by ENSO class (composites)",
-            "limitations": "monthly water balance without soil storage; gross revenue, not margin; "
+            "limitations": "one-bucket soil water balance with modelled soil properties (SoilGrids) and "
+                           "maximum rooting depth from sowing; gross revenue, not margin; "
                            "scores are relative among these candidates",
         },
     })

@@ -57,14 +57,12 @@ class TestComponents:
         occ = sc.occupancy(["soja", "aveia_cobertura"], CAL)
         assert sc.soil_component(occ, {m: 2.0 for m in range(1, 13)})["value"] == 0
 
-    def test_water_deficit_is_month_by_month_and_never_negative(self):
-        occ = sc.occupancy(["soja"], {"soja": {"sow": 11, "harvest": 12}})  # ini, end
-        et0 = {m: 100.0 for m in range(1, 13)}
-        rain = {m: 0.0 for m in range(1, 13)}
-        rain[12] = 500.0  # surplus in December must not offset November
-        out = sc.water_component(occ, {"soja": KC["soja"]}, et0, rain)
-        assert out["value"] == pytest.approx(40.0)  # Nov: 0.4 x 100 - 0
-        assert out["demand_mm"] == pytest.approx(40.0 + 50.0)
+    def test_water_component_passes_the_simulation_through(self):
+        out = sc.water_component({"deficit_mm": 40.0, "demand_mm": 500.0, "stress_days": 12, "n_years": 4})
+        assert out["value"] == 40.0 and out["stress_days"] == 12 and out["better"] == "lower"
+
+    def test_water_component_without_simulation_is_none(self):
+        assert sc.water_component(None)["value"] is None
 
     def test_income_change_weights_crops_by_revenue(self):
         out = sc.income_component(["soja", "trigo"], CROPS, {1: 6000.0, 2: 2000.0}, {1: (10.0, 5), 2: (-30.0, 5)})
@@ -99,9 +97,9 @@ class TestCombining:
         rotations = [{"id": "soja_trigo", "crops": ["soja", "trigo"]},
                      {"id": "soja_cob", "crops": ["soja", "aveia_cobertura"]},
                      {"id": "soja_pousio", "crops": ["soja"]}]
-        climate = {"heavy_days": {m: 2.0 for m in range(1, 13)},
-                   "et0": {m: 100.0 for m in range(1, 13)}, "rain": {m: 120.0 for m in range(1, 13)}}
-        res = sc.score_rotations(rotations, CROPS, CAL, climate, {1: 6000.0, 2: 2000.0}, {1: (15.0, 5), 2: (-30.0, 5)})
+        climate = {"heavy_days": {m: 2.0 for m in range(1, 13)}}
+        water = {r["id"]: {"deficit_mm": 10.0, "demand_mm": 500.0, "stress_days": 3, "n_years": 5} for r in rotations}
+        res = sc.score_rotations(rotations, CROPS, CAL, climate, {1: 6000.0, 2: 2000.0}, {1: (15.0, 5), 2: (-30.0, 5)}, water)
         by = {r["id"]: r for r in res}
         assert by["soja_pousio"]["soil"]["score"] == 0  # most bare months
         assert by["soja_cob"]["soil"]["score"] == 100
@@ -111,3 +109,30 @@ class TestCombining:
         assert soil_first[0]["id"] == "soja_cob"
         assert income_first[-1]["id"] == "soja_trigo"
         assert [r["rank"] for r in soil_first] == [1, 2, 3]
+
+
+class TestRotationsConfig:
+    """config/rotations.yaml is hand-written: guard the invariants the scoring relies on."""
+
+    cfg = __import__("pipeline.common", fromlist=["load_config"]).load_config("rotations.yaml")
+
+    def test_every_crop_has_fao56_parameters_and_a_unique_label(self):
+        abbrs = []
+        for cid, spec in self.cfg["crops"].items():
+            assert {"ini", "mid", "end"} <= spec["kc"].keys(), cid
+            assert 0 < spec["root"]["zr_m"] <= 2.0 and 0.1 <= spec["root"]["p"] <= 0.8, cid
+            lo, hi = spec["root"]["range_m"]
+            assert spec["root"]["zr_m"] == hi, f"{cid}: Zr must be the upper end of the FAO-56 range"
+            abbrs.append(spec["abbr"])
+        assert len(abbrs) == len(set(abbrs))
+
+    def test_every_rotation_is_a_possible_calendar(self):
+        for region, rots in self.cfg["rotations"].items():
+            cal = {k: v for k, v in self.cfg["calendars"][region].items() if k != "source"}
+            for rot in rots:
+                sc.occupancy(rot["crops"], sc.rotation_windows(rot, cal))  # raises if impossible
+
+    def test_cash_crops_name_their_pam_codes(self):
+        for cid, spec in self.cfg["crops"].items():
+            if not spec.get("cover_crop"):
+                assert spec["revenue_pam_code"] and spec["anomaly_pam_code"], cid

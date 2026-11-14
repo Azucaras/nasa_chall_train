@@ -4,8 +4,10 @@ Three components, each a physical quantity first and a 0-100 score second:
 
 soil    Heavy-rain days (>= 20 mm, ETCCDI R20mm) that fall in months when the rotation leaves the
         field bare, in years of the chosen ENSO class. Fewer is better.
-water   Crop water deficit: for each month, the field's crop water use (Kc x ET0, FAO-56) minus the
-        month's rain, counted only when positive, summed over the year. Smaller is better.
+water   Water stress: the transpiration the crops wanted but could not get, mm/yr -- sum over cropped
+        days of (Kc ET0 - Ks Kc ET0) from a daily FAO-56 soil water balance (pipeline/soilwater.py)
+        that stores rain in the root zone between days, averaged over years of the ENSO class.
+        Smaller is better.
 income  Change in the rotation's gross revenue in years of the chosen ENSO class, from each cash
         crop's recent revenue per hectare (IBGE PAM) and its yield anomaly in that class. Higher
         (less negative) is better: this is income *stability*, not income level.
@@ -90,23 +92,25 @@ def soil_component(occ: dict[int, list], heavy_days: dict[int, float]) -> dict[s
             "unit": "days/yr", "better": "lower"}
 
 
-def water_component(
-    occ: dict[int, list], kc: dict[str, dict[str, float]], et0: dict[int, float], rain: dict[int, float]
-) -> dict[str, Any]:
-    """Seasonal crop water deficit, mm (lower is better), with the month-by-month working."""
-    rows, deficit, demand = [], 0.0, 0.0
-    for m in MONTHS:
-        if not occ[m]:
-            continue
-        if _nan(et0.get(m)) or _nan(rain.get(m)):
-            return {"value": None, "reason": f"no ET0/rain climatology for month {m}"}
-        kc_m = sum(e["share"] * kc_value(e["stage"], kc[e["crop"]]) for e in occ[m])
-        etc = kc_m * et0[m]
-        gap = max(0.0, etc - rain[m])
-        deficit += gap
-        demand += etc
-        rows.append({"month": m, "kc": round(kc_m, 3), "et0_mm": et0[m], "etc_mm": etc, "rain_mm": rain[m], "deficit_mm": gap})
-    return {"value": deficit, "demand_mm": demand, "by_month": rows, "unit": "mm/yr", "better": "lower"}
+def water_component(stats: dict[str, Any] | None) -> dict[str, Any]:
+    """Water stress from the daily soil water balance (lower is better).
+
+    ``stats``: mean over the ENSO class's years of the transpiration deficit (mm), stress days and
+    crop demand, with the month-by-month deficit and the number of years. None -> no value.
+    """
+    if not stats or stats.get("deficit_mm") is None or _nan(stats.get("deficit_mm")):
+        return {"value": None, "reason": (stats or {}).get("reason", "no soil water simulation for this class")}
+    return {
+        "value": stats["deficit_mm"],
+        "demand_mm": stats["demand_mm"],
+        "stress_days": stats["stress_days"],
+        "n_years": stats["n_years"],
+        "taw_mm": stats.get("taw_mm"),
+        "by_month": stats.get("by_month", []),
+        "unit": "mm/yr",
+        "better": "lower",
+        "model": "FAO-56 daily soil water balance",
+    }
 
 
 def income_component(
@@ -172,6 +176,11 @@ def weighted_total(scores: dict[str, float | None], weights: dict[str, float]) -
     return sum(w * scores[c] for c, w in used.items()) / sum(used.values())
 
 
+def rotation_windows(rot: dict[str, Any], calendar: dict[str, dict[str, int]]) -> dict[str, dict[str, int]]:
+    """Sow/harvest window of each crop in a rotation, applying the rotation's overrides."""
+    return {c: {**calendar[c], **rot.get("override", {}).get(c, {})} for c in rot["crops"]}
+
+
 def score_rotations(
     rotations: list[dict[str, Any]],
     crops: dict[str, dict[str, Any]],
@@ -179,16 +188,18 @@ def score_rotations(
     climate: dict[str, dict[int, float]],
     revenue_per_ha: dict[int, float],
     anomaly: dict[int, tuple[float | None, int]],
+    water_stats: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Score every candidate of one municipality for one ENSO class.
 
-    ``climate`` holds monthly means for that class: {"heavy_days": {m: ..}, "et0": {m: ..},
-    "rain": {m: ..}}. Returns one dict per rotation with raw components and 0-100 scores.
+    ``climate`` holds monthly heavy-rain-day means for that class: {"heavy_days": {m: ..}}.
+    ``water_stats`` maps rotation id -> soil water balance summary for that class.
+    Returns one dict per rotation with raw components and 0-100 scores.
     """
-    kc = {cid: spec["kc"] for cid, spec in crops.items()}
+    water_stats = water_stats or {}
     results = []
     for rot in rotations:
-        windows = {c: {**calendar[c], **rot.get("override", {}).get(c, {})} for c in rot["crops"]}
+        windows = rotation_windows(rot, calendar)
         occ = occupancy(rot["crops"], windows)
         results.append({
             "id": rot["id"],
@@ -196,7 +207,7 @@ def score_rotations(
             "windows": windows,
             "calendar": {m: [{"crop": e["crop"], "stage": e["stage"]} for e in occ[m]] for m in MONTHS},
             "soil": soil_component(occ, climate["heavy_days"]),
-            "water": water_component(occ, kc, climate["et0"], climate["rain"]),
+            "water": water_component(water_stats.get(rot["id"])),
             "income": income_component(rot["crops"], crops, revenue_per_ha, anomaly),
         })
     for comp in COMPONENTS:

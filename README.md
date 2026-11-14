@@ -85,6 +85,7 @@ uv run python -m pipeline.fetch_pam      # IBGE PAM yields, tables 1612 and 839
 uv run python -m pipeline.fetch_meteomatics  # optional: 15-day / 46-day / seasonal forecasts (needs a Meteomatics login)
 uv run python -m pipeline.fetch_planetary    # optional: MODIS NDVI, land cover, slope (uv sync --extra planetary)
 uv run python -m pipeline.build_evidence # seasons, anomalies, ENSO composites, season-to-date
+uv run python -m pipeline.fetch_soil     # SoilGrids water retention (field capacity, wilting point)
 uv run python -m pipeline.build_scoring  # rotation scores for every ENSO class (needs build_evidence)
 uv run python -m api.export              # write the API responses as JSON for the web app
 uv run python -m pipeline.probe_sources  # check that every data source still answers (a few KB each)
@@ -250,22 +251,23 @@ These are enforced in review, and in `CLAUDE.md`:
 
 **Done (rotation scoring):** see [docs/scoring.md](docs/scoring.md).
 
-- `pipeline/scoring.py` (pure): soil = heavy-rain days on bare soil; water = monthly crop water deficit
-  (Kc × ET0 − rain); income = revenue change in the ENSO class; min–max scores, weighted total, rank.
+- `pipeline/scoring.py` (pure): soil = heavy-rain days on bare soil; water = transpiration lost to
+  stress in a daily FAO-56 soil water balance (`pipeline/soilwater.py`, SoilGrids water retention,
+  FAO-56 Table 22 roots); income = revenue change in the ENSO class; min–max scores, weighted
+  total, rank.
 - `pipeline/agromet.py`: FAO-56 Penman–Monteith ET0, verified against FAO-56 Example 18.
 - `config/rotations.yaml`: 6 candidates for RS, 5 for MATOPIBA; Kc from FAO-56 Table 12 (cited);
   calendars `suposicao`.
 - API 1.2: `rotations` block and `/municipalities/{code}/rotations?soil=&water=&income=&enso_class=`.
 - Interface: priority controls, ENSO-class switch, ranked cards with calendar strip, plain-language
   reasons and an "open the arithmetic" table.
-- 125 tests passing.
+- 144 tests passing.
 
 The ranking changes with the ENSO sign. In Tupanciretã under equal weights, strong El Niño ranks
-soy → cover oats first and soy → wheat 5th (wheat −32.5 % in those years); La Niña ranks soy →
-grain oats first and soy → wheat 2nd.
+soy → cover oats first and soy → wheat last (27; wheat −32.5 % in those years); La Niña ranks soy →
+grain oats first and soy → wheat third (83).
 
-**Not started:** CHIRPS, Phases 2–4 (beyond the satellite pieces already integrated), a soil-water
-bucket model for the water component.
+**Not started:** CHIRPS, Phases 2–4 (beyond the satellite pieces already integrated).
 
 ### Known limitations
 
@@ -299,9 +301,10 @@ bucket model for the water component.
   droughts (2012, 2022, 2023).
 - The stable-cropland mask comes from 2017–2023 land cover; NDVI for 2000–2016 is read over
   pixels that may not all have been cropland then (notably in LEM, where the frontier expanded).
-- Rotation scoring: the water component is a monthly balance without soil storage (penalises crops
-  finishing in the dry season); income is gross revenue, not margin; scores are relative among the
-  candidates; sowing/harvest calendars are `suposicao` until checked against CONAB.
+- Rotation scoring: min–max scaling exaggerates small differences (16 mm of water stress can move a
+  rotation from 100 to 0 on that priority); soil water capacity is modelled (SoilGrids) and drives
+  the water score; one-bucket balance with full roots from sowing; income is gross revenue, not
+  margin; sowing/harvest calendars are `suposicao` until checked against CONAB.
 - The map basemap uses OpenStreetMap tiles (fine for a demo, not for heavy traffic); set
   `VITE_BASEMAP_TILES` to another provider for production.
 - MapBiomas access is unresolved — the latest collection may require manual download or Earth
