@@ -109,10 +109,12 @@ def main() -> None:
     for code in regions.code:
         mun = pam[pam.code == code]
         area = mun[(mun.table == 1612) & (mun.variable == "area_planted_ha")]
-        main = set(ev.main_crops(area[["year", "crop_code", "value"]], 5, ya["min_area_share"]))
+        # Largest planted area first; that order is what the UI shows.
+        main = ev.main_crops(area[["year", "crop_code", "value"]], 5, ya["min_area_share"])
         if 2711 in main:  # maize total -> use the per-harvest series from table 839 instead
-            main |= set(mun[mun.table == 839].crop_code.unique().tolist())
-        for crop_code in sorted(c for c in main if c in known):
+            at = main.index(2711)
+            main[at:at] = sorted(mun[mun.table == 839].crop_code.unique().tolist())
+        for crop_code in [c for c in main if c in known]:
             spec = known[crop_code]
             s = mun[(mun.crop_code == crop_code) & (mun.variable == "yield_kg_ha") & (mun.flag == "")]
             s = s[["year", "value", "crop", "table"]].rename(columns={"value": "yield_kg_ha"})

@@ -3,9 +3,12 @@
 **ENSO-conditioned crop rotation planning for Brazilian farms, built on NASA Earth observations.**
 NASA Space Apps Challenge 2026 — *Field Shift: Adapting Farms with NASA Data*.
 
-> **Status: Phase 0 complete; Phase 1 started.** ENSO ingestion (`pipeline/fetch_enso.py`) and a
-> source probe (`pipeline/probe_sources.py`) are in place. No climate or yield series yet. See
-> [Current state](#current-state) and [docs/data_sources.md](docs/data_sources.md).
+> **Status: Phase 1 data + evidence + interface done; rotation scoring not started.** ENSO, NASA
+> POWER and IBGE PAM are ingested for both pilots, the analog-year evidence is built, and a web
+> interface shows it. See [Current state](#current-state).
+>
+> **New here?** Read [docs/how_it_works.md](docs/how_it_works.md) — the backend explained end to
+> end. Reusing the interface in another project: [web/README.md](web/README.md).
 
 ---
 
@@ -73,10 +76,23 @@ from the IBGE *malhas* mesh by `pipeline/fetch_regions.py`. Neither was typed fr
 ```bash
 uv sync                                  # install Phase 1 dependencies
 uv run pytest                            # run the test suite
-uv run python -m pipeline.fetch_regions  # resolve municipalities, compute centroids (Brazilian network)
+uv run python -m pipeline.fetch_regions  # municipality boundaries + centroids (IBGE)
 uv run python -m pipeline.fetch_enso     # ONI, RONI, weekly Niño, CPC discussion + strength outlook
+uv run python -m pipeline.fetch_power    # daily NASA POWER at each centroid, 1981-today
+uv run python -m pipeline.fetch_pam      # IBGE PAM yields, tables 1612 and 839
+uv run python -m pipeline.build_evidence # seasons, anomalies, ENSO composites, season-to-date
+uv run python -m api.export              # write the API responses as JSON for the web app
 uv run python -m pipeline.probe_sources  # check that every data source still answers (a few KB each)
 ```
+
+Then the interface (Node 18+):
+
+```bash
+cd web && npm install && npm run dev
+```
+
+Or serve the live API instead of static files: `uv run uvicorn api.main:app --reload` (docs at
+`/docs`) and start the web app with `VITE_DATA_MODE=api`.
 
 If `uv` is not found, restart your shell (winget added it to PATH) or call it at
 `%LOCALAPPDATA%\Microsoft\WinGet\Packages\astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe\uv.exe`.
@@ -176,8 +192,37 @@ These are enforced in review, and in `CLAUDE.md`:
   sources and a cheap reachability check.
 - 42 tests passing (including a guard that every registered source covers Brazil).
 
-**Not started:** NASA POWER, PAM and CHIRPS ingestion (rest of Phase 1), and Phases 2 through 4. There is no
-API, no web interface, and no scoring code yet.
+**Done (Phase 1, POWER + PAM + evidence + interface):**
+
+- `fetch_regions` falls back to IBGE's 2025 per-state municipal shapefile when the *malhas* API is
+  unreachable, and writes `regions.geojson` for the map.
+- `fetch_power` → `power_daily.parquet`: 10 daily variables at each centroid, 1981 to the latest
+  published day (~3-day lag).
+- `fetch_pam` → `pam.parquet`: SIDRA table 1612 (all temporary crops) and 839 (maize 1st / 2nd
+  harvest), 1974–2025, with SIDRA's symbols kept as flags.
+- `pipeline/evidence.py` (pure) + `build_evidence` → crop-year ENSO labels, ETCCDI rain indices per
+  season, 1991–2020 anomalies, detrended yield anomalies, composites by ENSO class with n and
+  years, and season-to-date rain vs climatology and strong-El-Niño years.
+- `config/analysis.yaml` (method choices, each sourced or marked *project choice*) and
+  `config/crops.yaml` (SIDRA codes; summer/winter season marked `suposicao`).
+- `api/` — FastAPI over the processed data (contract v1) and a static JSON exporter.
+- `web/` — React + Vite + TypeScript + Recharts + MapLibre interface, pt-BR with an English switch,
+  light/dark, every chart with a table view; the `web/src/fieldphase/` kit is portable.
+- 79 tests passing, including an end-to-end pipeline→API contract test on synthetic data.
+
+**First results (n is small — see limitations):**
+
+| Strong El Niño years vs normal | Tupanciretã (RS) | Luís Eduardo Magalhães (BA) |
+|---|---|---|
+| Rain Sep–Dec | +40 % (n=5) | −18 % (n=5) |
+| Longest dry spell Jan–Apr | +1.3 days (n=5) | +4.5 days (n=5) |
+| Soybean yield vs trend | +15.5 % (n=5) | −16 % (n=2) |
+| Wheat yield vs trend | −32.5 % (n=5) | — |
+| Sorghum yield vs trend | — | −20 % (n=2) |
+| Rain since 1 Sep 2026 | 624 mm vs 448 mm normal | 93 mm vs 169 mm normal |
+
+**Not started:** rotation scoring (`pipeline/scoring.py`, `config/rotations.yaml`), CHIRPS, Phases
+2–4.
 
 ### Known limitations
 
@@ -190,7 +235,20 @@ API, no web interface, and no scoring code yet.
   will be labelled with its own shorter baseline.
 - The two scraped CPC pages are parsed by structure and fail loudly (`LayoutChanged`) if CPC
   redesigns them; that is a hard stop, never a silent guess.
-- From outside Brazil, IBGE *localidades*/*malhas* reset the connection, so `fetch_regions` must run
-  from a Brazilian network or reuse its cached `data/raw/` response. SIDRA is unaffected.
+- From outside Brazil, IBGE *localidades*/*malhas* reset the connection; `fetch_regions` then uses
+  the per-state shapefile from `geoftp.ibge.gov.br`. SIDRA is unaffected.
+- **Small samples.** LEM's PAM series starts in 2001, so it has only two strong El Niño years
+  (2010, 2016). The UI attaches a caution to any composite with fewer than 3 years.
+- NASA POWER values are ~50 km grid-cell averages from reanalysis (MERRA-2; GEOS-IT for recent
+  days), not station readings; the two model streams are joined without homogenisation.
+- Yield anomalies use a single linear trend per crop; a crop whose technology trend bent (e.g. the
+  LEM soy expansion) is only approximately detrended.
+- Crop seasons in `config/crops.yaml` (which ENSO year a winter crop is compared with) are
+  `suposicao` until the CONAB crop calendar is cited; the UI shows that warning.
+- `config/regions.yaml` describes LEM as "soy-safrinha maize and cotton", but PAM records 2nd-crop
+  maize there only in 2012–2015 (~1 000 ha) and none since; the main companions of soy are cotton,
+  sorghum, 1st-crop maize and beans. The *safrinha_failure* hazard label may need revisiting.
+- The map basemap uses OpenStreetMap tiles (fine for a demo, not for heavy traffic); set
+  `VITE_BASEMAP_TILES` to another provider for production.
 - MapBiomas access is unresolved — the latest collection may require manual download or Earth
   Engine. To be settled in Phase 3.

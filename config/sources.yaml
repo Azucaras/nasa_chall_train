@@ -118,6 +118,15 @@ sources:
     use: core
     probe: https://servicodados.ibge.gov.br/api/v1/localidades/municipios/2919553
     verified: connection reset from the cloud runner -- works from Brazil (Phase 0 ran there)
+  - id: ibge_geoftp
+    name: IBGE municipal mesh, per-state shapefiles (fallback for localidades/malhas)
+    coverage: brazil
+    access: file
+    auth: none
+    cadence: annual mesh
+    use: core
+    probe: https://geoftp.ibge.gov.br/organizacao_do_territorio/malhas_territoriais/malhas_municipais/municipio_2025/UFs/RS/
+    verified: ok from the cloud runner (2025 mesh; RS 10 MB, BA 14 MB zip)
   - id: gaez
     name: FAO GAEZ v4 (crop suitability, attainable yield)
     coverage: global

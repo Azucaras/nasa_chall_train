@@ -1,0 +1,270 @@
+"""Turn the processed Parquet files into the JSON payloads of the public contract (v1).
+
+Used by both the FastAPI server (api/main.py) and the static exporter (api/export.py), so a
+static deployment and a live server return byte-for-byte the same shapes.
+
+Contract rules, mirrored in web/src/api/types.ts:
+* snake_case keys, plain JSON types only (NaN -> null, dates -> ISO strings);
+* categorical values are stable codes (``el_nino_strong``), never translated text -- the UI owns
+  the wording;
+* every block carries ``provenance`` (source + method) and every crop carries ``source`` so a
+  ``suposicao`` can be surfaced as a warning;
+* nothing here is mock data; ``meta.mock`` is false and would be true for any mock payload.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import os
+from functools import lru_cache
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+import pyarrow.parquet as pq
+
+from pipeline.common import PROCESSED_DIR, load_config
+
+CONTRACT_VERSION = "1"
+ENSO_CLASSES = ["el_nino_strong", "el_nino_moderate", "neutral", "la_nina"]
+
+
+class DataMissing(RuntimeError):
+    """A processed file the API needs has not been built yet."""
+
+
+def data_dir() -> Path:
+    return Path(os.environ.get("FIELD_PHASE_DATA_DIR", PROCESSED_DIR))
+
+
+@lru_cache(maxsize=None)
+def _frame(name: str, directory: str) -> pd.DataFrame:
+    path = Path(directory) / name
+    if not path.exists():
+        raise DataMissing(f"{name} not found in {directory}; run the pipeline (see README)")
+    return pd.read_parquet(path)
+
+
+@lru_cache(maxsize=None)
+def _meta(name: str, directory: str) -> dict[str, str]:
+    raw = pq.read_schema(Path(directory) / name).metadata or {}
+    return {k.decode(): v.decode() for k, v in raw.items() if not k.startswith(b"pandas")}
+
+
+def frame(name: str) -> pd.DataFrame:
+    return _frame(name, str(data_dir()))
+
+
+def file_meta(name: str) -> dict[str, str]:
+    return _meta(name, str(data_dir()))
+
+
+def clear_cache() -> None:
+    _frame.cache_clear()
+    _meta.cache_clear()
+
+
+def clean(value: Any) -> Any:
+    """Make a value JSON-safe: NaN/NaT -> None, numpy scalars -> Python, timestamps -> ISO."""
+    if isinstance(value, dict):
+        return {k: clean(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [clean(v) for v in value]
+    if isinstance(value, pd.Timestamp):
+        return None if pd.isna(value) else value.date().isoformat()
+    if value is None or value is pd.NaT:
+        return None
+    if hasattr(value, "item"):  # numpy scalar
+        value = value.item()
+    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+        return None
+    return value
+
+
+def records(df: pd.DataFrame, columns: list[str] | None = None) -> list[dict[str, Any]]:
+    if columns:
+        df = df[[c for c in columns if c in df.columns]]
+    return [clean(r) for r in df.to_dict(orient="records")]
+
+
+def round_floats(df: pd.DataFrame, decimals: int = 2) -> pd.DataFrame:
+    out = df.copy()
+    for c in out.select_dtypes("float").columns:
+        out[c] = out[c].round(decimals)
+    return out
+
+
+# --------------------------------------------------------------------------------------------
+# Payloads
+# --------------------------------------------------------------------------------------------
+
+
+def meta_payload() -> dict[str, Any]:
+    crops = load_config("crops.yaml")["crops"]
+    assumptions = [
+        {"scope": "crop", "crop_code": int(code), "field": "season", "value": spec["season"],
+         "source": spec["source"]}
+        for code, spec in crops.items() if spec["source"] == "suposicao"
+    ]
+    analysis = load_config("analysis.yaml")
+    current = file_meta("season_progress.parquet")
+    return clean({
+        "app": "Field Phase",
+        "contract_version": CONTRACT_VERSION,
+        "mock": False,
+        "generated_at": pd.Timestamp.now(tz="UTC").isoformat(timespec="seconds"),
+        "baseline_crop_years": analysis["baseline_crop_years"],
+        "current_crop_year": int(current.get("current_crop_year", 0)) or None,
+        "enso_classes": ENSO_CLASSES,
+        "methods": {
+            "rain_indices": analysis["rain_indices"]["source"].strip(),
+            "crop_year_enso": analysis["crop_year_enso"]["source"].strip(),
+            "yield_anomaly": analysis["yield_anomaly"]["source"].strip(),
+        },
+        "assumptions": assumptions,
+        "datasets": {
+            name: file_meta(name) for name in (
+                "enso_seasonal.parquet", "enso_current.parquet", "power_daily.parquet",
+                "pam.parquet", "regions.parquet",
+            ) if (data_dir() / name).exists()
+        },
+    })
+
+
+def enso_payload() -> dict[str, Any]:
+    cur = frame("enso_current.parquet").iloc[0].to_dict()
+    outlook = frame("enso_strength_forecast.parquet")
+    seasonal = frame("enso_seasonal.parquet")
+    cy = frame("crop_year_enso.parquet")
+    weekly = frame("enso_weekly.parquet").tail(26)
+    return clean({
+        "current": {
+            "discussion": {k: cur[k] for k in (
+                "issued", "alert_status", "synopsis", "next_issue", "nino34_quoted_c",
+                "discussion_text", "source_url")},
+            "roni": {"season": cur["roni_latest_season"], "value": cur["roni_latest"],
+                     "phase": cur["roni_latest_phase"], "strength": cur["roni_latest_strength"]},
+            "oni": {"season": cur["oni_latest_season"], "value": cur["oni_latest"]},
+            "weekly_nino34": {"week": cur["weekly_latest_week"], "anomaly": cur["weekly_nino34_anom"]},
+            "fetched_at": cur["fetched_at"],
+        },
+        "outlook": records(outlook),
+        "weekly": records(weekly[["week_center", "nino34_anom", "nino12_anom"]]),
+        "history": records(round_floats(seasonal), [
+            "season", "year", "center_month", "crop_year", "roni", "oni",
+            "roni_phase", "roni_strength"]),
+        "crop_years": records(cy),
+        "provenance": {
+            "index": "NOAA CPC RONI (official since Feb 2026); ONI shown for comparison",
+            "discussion": cur["source_url"],
+            "outlook": file_meta("enso_strength_forecast.parquet").get("source"),
+            "rules": "config/enso.yaml",
+        },
+    })
+
+
+def _with_official_names(regions: pd.DataFrame) -> pd.DataFrame:
+    """Add ``name_official``: IBGE's accented name as SIDRA returns it ("Tupanciretã"), falling
+    back to the ASCII config name when PAM is not built."""
+    out = regions.copy()
+    try:
+        pam = frame("pam.parquet")
+        names = pam.drop_duplicates("code").set_index("code").municipality.str.replace(r"\s*\(\w{2}\)$", "", regex=True)
+        out["name_official"] = out.code.map(names).fillna(out.name)
+    except DataMissing:
+        out["name_official"] = out.name
+    return out
+
+
+def municipalities_payload() -> dict[str, Any]:
+    regions = _with_official_names(frame("regions.parquet"))
+    geo_path = data_dir() / "regions.geojson"
+    geojson = json.loads(geo_path.read_text(encoding="utf-8")) if geo_path.exists() else None
+    return clean({
+        "municipalities": records(regions, [
+            "code", "name", "name_official", "uf", "region_id", "region_name", "enso_signal", "hazards",
+            "centroid_lon", "centroid_lat", "min_lon", "min_lat", "max_lon", "max_lat",
+            "geometry_source"]),
+        "geojson": geojson,
+        "provenance": {"source": file_meta("regions.parquet").get("source"),
+                       "map_note": "outlines simplified to ~100 m for display; centroids use full resolution"},
+    })
+
+
+def municipality_payload(code: int) -> dict[str, Any]:
+    regions = _with_official_names(frame("regions.parquet"))
+    row = regions[regions.code == code]
+    if row.empty:
+        raise KeyError(code)
+    mun = records(row)[0]
+    mun["hazards"] = mun["hazards"].split(",") if mun.get("hazards") else []
+
+    climate = round_floats(frame("climate_seasonal.parquet"))
+    climate = climate[climate.code == code]
+    comps = round_floats(frame("composites.parquet"))
+    comps = comps[comps.code == code]
+    yields = round_floats(frame("yield_anomalies.parquet"))
+    yields = yields[yields.code == code]
+    progress = round_floats(frame("season_progress.parquet"), 1)
+    progress = progress[progress.code == code]
+    cy = frame("crop_year_enso.parquet")
+
+    crops_out = []
+    for crop_code, g in yields.groupby("crop_code", sort=False):
+        first = g.iloc[0]
+        c = comps[(comps.kind == "yield") & (comps.crop_code == crop_code)]
+        crops_out.append({
+            "crop_code": int(crop_code),
+            "name_pt": first.crop_pt,
+            "name_en": first.crop_en,
+            "season": first.season,
+            "source": first.crop_source,
+            "assumption": first.crop_source == "suposicao",
+            "pam_table": int(first.table),
+            "series": records(g, ["crop_year", "enso_crop_year", "yield_kg_ha", "trend_kg_ha",
+                                  "anomaly_pct", "enso_class"]),
+            "composite": records(c, ["enso_class", "n", "mean", "median", "minus_neutral", "years"]),
+        })
+    current_cy = int(file_meta("season_progress.parquet")["current_crop_year"])
+    current = cy[cy.crop_year == current_cy]
+
+    climate_cols = ["crop_year", "enso_class", "season_rain_mm", "season_rain_mm_anom_pct",
+                    "early_rain_mm", "early_rain_mm_anom_pct", "late_rain_mm", "late_rain_mm_anom_pct",
+                    "early_r20_days", "early_r20_days_anom", "late_cdd_days", "late_cdd_days_anom",
+                    "early_rx5_mm", "early_rx5_mm_anom_pct", "season_gwetroot", "season_gwetroot_anom",
+                    "season_tmax_c", "season_tmax_c_anom"]
+    climate_comps = comps[comps.kind == "climate"]
+    return clean({
+        "municipality": mun,
+        "current_crop_year": {
+            "crop_year": current_cy,
+            **(records(current)[0] if not current.empty else {}),
+        },
+        "season_progress": {
+            "start": progress.date.min(),
+            "last_observed": progress.dropna(subset=["current_mm"]).date.max(),
+            "n_baseline": int(progress.n_baseline.iloc[0]),
+            "n_analog": int(progress.n_analog.iloc[0]),
+            "analog_years": [int(y) for y in str(progress.analog_years.iloc[0]).split(",") if y],
+            "days": records(progress, ["day", "date", "current_mm", "baseline_mean_mm",
+                                       "baseline_p10_mm", "baseline_p90_mm", "analog_mean_mm"]),
+        },
+        "climate": {
+            "seasons": records(climate, climate_cols),
+            "composites": {
+                metric: {
+                    "unit": g.unit.iloc[0],
+                    "by_class": records(g, ["enso_class", "n", "mean", "median", "minus_neutral", "years"]),
+                }
+                for metric, g in climate_comps.groupby("metric", sort=False)
+            },
+        },
+        "yield": {"crops": crops_out},
+        "provenance": {
+            "climate": "NASA POWER daily (grid-cell average at the IBGE centroid); ETCCDI indices",
+            "yield": "IBGE PAM via SIDRA (tables 1612, 839); linear-trend anomalies",
+            "baseline_crop_years": file_meta("climate_seasonal.parquet").get("baseline_crop_years"),
+            "rules": "config/analysis.yaml, config/crops.yaml",
+        },
+    })

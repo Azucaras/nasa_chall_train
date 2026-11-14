@@ -17,4 +17,6 @@ __pycache__/
 
 node_modules/
 web/dist/
+# Static export of the API (python -m api.export) -- derived, reproducible.
+web/public/data/
 .DS_Store
