@@ -1,5 +1,8 @@
 # Data sources: what answers, how, and whether it fits Field Phase
 
+**Scope: Brazil only.** Every source below is either Brazilian or global with coverage of Brazil.
+US-only datasets are excluded (see [Excluded](#excluded-us-only-datasets)).
+
 Probed on **2026-11-14** from a Linux cloud runner. Re-run at any time with:
 
 ```bash
@@ -13,20 +16,19 @@ The machine-readable registry behind this page is [`config/sources.yaml`](../con
 1. **ENSO data is fully automatable, and mostly without scraping.** CPC publishes ONI, **RONI** and the
    weekly Niño SSTs as plain text. Only the monthly *Diagnostic Discussion* and the *Strength
    Probabilities* table are HTML, and both are now scraped by `pipeline/fetch_enso.py`.
-2. **Eight of the fifteen links cover only the United States** (Web Soil Survey, NRCS soils,
-   CropScape, PRISM, NAIP, NLCD, CoCoRaHS, USGS water data). They return nothing for Tupanciretã or
-   Luís Eduardo Magalhães. Each one has a global or Brazilian equivalent below, and most of those were
-   verified in the same run.
+2. **The project is Brazil-only.** Eight of the fifteen datasets originally proposed cover only the
+   United States, so they were dropped. Each has a global or Brazilian replacement, listed under
+   [Excluded](#excluded-us-only-datasets).
 3. **Only one source is truly real-time:** the CPC weekly Niño SSTs. The others are near-real-time
    (NASA POWER, CHIRPS prelim, INMET), monthly (ONI/RONI, discussion), annual (PAM) or static (soil).
    For a crop-planning tool that is the right cadence: decisions are seasonal.
 
-## Your links, one by one
+## Proposed links that cover Brazil
 
 | Link | Covers | Access | Verdict for Field Phase |
 |---|---|---|---|
 | CPC ENSO page (`enso.shtml`) | global | HTML hub | **Core.** Hub only; the data behind it is below. |
-| ↳ `oni.ascii.txt`, `RONI.ascii.txt` | global | **plain-text file** | **Core, done.** RONI has a text file too. The README said it didn't. |
+| ↳ `oni.ascii.txt`, `RONI.ascii.txt` | global | **plain-text file** | **Core, done.** RONI has a text file too. The README used to say it didn't. |
 | ↳ `wksst9120.for` (weekly Niño) | global | fixed-width text | **Core, done.** Weekly; latest week 4 Nov 2026, Niño-3.4 +3.3 °C. |
 | ↳ ENSO Diagnostic Discussion | global | **scrape** | **Core, done.** Alert status, synopsis, next issue date. |
 | ↳ ENSO Strength Probabilities | global | **scrape** (HTML table) | **Core, done.** % chance per RONI bin, next 9 seasons. |
@@ -34,14 +36,22 @@ The machine-readable registry behind this page is [`config/sources.yaml`](../con
 | GAEZ (FAO) | global | ArcGIS Hub portal | **Phase 3 candidate** for crop suitability / attainable yield. Raster endpoint not mapped yet. |
 | SRTM (Earthdata) | global | Earthdata download | **Optional.** Slope is useful for erosion risk; needs Earthdata login. Metadata visible via CMR. |
 | EarthExplorer | global | M2M JSON API | **Optional.** API alive; every call needs an ERS account *and* a separately approved M2M access request. |
-| Ag Data Commons | mostly US | Figshare portal | **Reference.** The site returns an empty `202` (bot challenge). Use the Figshare API, don't crawl it. |
-| Web Soil Survey / NRCS soils | US | Soil Data Access: SQL over REST | Not applicable. Verified working (`POST tabular/post.rest`). Use **SoilGrids**. |
-| CropScape (CDL) | US | REST | Not applicable. TLS chain rejected from the runner. Use **MapBiomas + IBGE PAM**. |
-| PRISM | US | REST (zip per day) | Not applicable. The old `/public/` path is retired; the new one is `/prism/data/get/us/...`. Use **POWER / CHIRPS**. |
-| NAIP | US | ArcGIS Hub | Not applicable. US aerial photos. Use **Landsat / Sentinel-2** via Earthdata or M2M. |
-| NLCD | US | WMS/WCS (GeoServer) | Not applicable. Capabilities document is 16 MB. Use **MapBiomas**. |
-| CoCoRaHS | US / CA | ASP.NET form, would need scraping | Not applicable. Use **INMET** stations. |
-| USGS water data | US | REST/JSON (NWIS) | Not applicable. Verified working. Brazil's equivalent is ANA HidroWeb (not checked). |
+
+## Excluded: US-only datasets
+
+Each of these was proposed and probed on 2026-11-14 (most answered fine), but none has data for a
+Brazilian municipality. They are not in `config/sources.yaml`.
+
+| Dataset | What it would have given | Brazilian / global replacement |
+|---|---|---|
+| Web Soil Survey, NRCS soils (SSURGO) | soil texture, carbon, drainage | **SoilGrids** 250 m (verified) |
+| CropScape (Cropland Data Layer) | crop type map, rotation history | **MapBiomas** (not yet probed) + **IBGE PAM** |
+| NLCD | land-cover history | **MapBiomas** |
+| PRISM | gridded daily rain and temperature | **NASA POWER**, **CHIRPS v3.0** (verified) |
+| CoCoRaHS | volunteer rain gauges | **INMET** automatic stations (verified) |
+| USGS water data (NWIS) | streamflow, groundwater | ANA HidroWeb (not checked); **SMAP** for soil water |
+| NAIP | aerial imagery | Landsat / Sentinel-2 via Earthdata or EarthExplorer |
+| USDA Ag Data Commons | research datasets, mostly US | none needed; Embrapa publications if a parameter needs a citation |
 
 ## Sources the project already relies on (Brazil and global)
 

@@ -5,10 +5,13 @@
 # where IBGE localidades and INMET answer (they reset connections from outside Brazil).
 #
 # Fields:
-#   coverage   global | brazil | us      -- `us` sources cannot serve the Brazilian pilots
+#   coverage   global | brazil          -- Field Phase is Brazil-only; US-only datasets
+#                                        (PRISM, NRCS, CropScape, NLCD, NAIP, CoCoRaHS, USGS
+#                                        water, Ag Data Commons) are excluded, see
+#                                        docs/data_sources.md
 #   access     api | file | scrape | portal
 #   auth       none | earthdata | ers | key
-#   use        core | phase2 | phase3 | reference | not_applicable
+#   use        core | phase2 | phase3 | reference
 #   verified   result from the Linux cloud probe of 2026-11-14 (see docs/data_sources.md)
 
 sources:
@@ -96,25 +99,6 @@ sources:
     use: reference
     probe: https://apitempo.inmet.gov.br/estacoes/T
     verified: ok with a User-Agent header (668 automatic stations); empty reply without one
-  - id: prism
-    name: PRISM (Oregon State) gridded climate
-    coverage: us
-    access: api
-    auth: none
-    cadence: daily
-    use: not_applicable
-    probe: https://services.nacse.org/prism/data/get/us/4km/ppt/20250624
-    verified: ok (zip, ~1.5 MB per day; old /public/ path retired)
-  - id: cocorahs
-    name: CoCoRaHS volunteer rain gauges
-    coverage: us
-    access: scrape
-    auth: none
-    cadence: daily
-    use: not_applicable
-    probe: https://data.cocorahs.org/export/exportreports.aspx
-    verified: ok (ASP.NET form, export parameters not mapped)
-
   # ---- Yield, land use, crops -------------------------------------------------------------
   - id: ibge_sidra
     name: IBGE SIDRA (PAM table 1612 yield / area)
@@ -143,25 +127,6 @@ sources:
     use: phase3
     probe: https://gaez.fao.org/
     verified: ok (ArcGIS Hub front end; raster access path not yet mapped)
-  - id: cropscape
-    name: USDA NASS CropScape / Cropland Data Layer
-    coverage: us
-    access: api
-    auth: none
-    cadence: annual
-    use: not_applicable
-    probe: https://nassgeodata.gmu.edu/axis2/services/CDLService/GetCDLStat?year=2023&fips=19015&format=json
-    verified: TLS chain rejected from the cloud runner
-  - id: ag_data_commons
-    name: USDA Ag Data Commons (Figshare-based repository)
-    coverage: us
-    access: portal
-    auth: none
-    cadence: ad hoc
-    use: reference
-    probe: https://agdatacommons.nal.usda.gov/
-    verified: HTTP 202 with empty body (bot challenge); Figshare API reachable
-
   # ---- Soil / terrain / imagery -----------------------------------------------------------
   - id: soilgrids
     name: ISRIC SoilGrids 250 m REST
@@ -172,24 +137,6 @@ sources:
     use: phase3
     probe: https://rest.isric.org/soilgrids/v2.0/properties/query?lon=-46.02&lat=-12.20&property=clay&depth=0-5cm&value=mean
     verified: ok (slow, first call timed out once)
-  - id: nrcs_sda
-    name: USDA NRCS Soil Data Access (SSURGO, SQL over REST)
-    coverage: us
-    access: api
-    auth: none
-    cadence: annual refresh
-    use: not_applicable
-    probe: https://sdmdataaccess.sc.egov.usda.gov/
-    verified: ok (POST tabular/post.rest with SQL)
-  - id: nlcd
-    name: USGS/MRLC National Land Cover Database
-    coverage: us
-    access: api
-    auth: none
-    cadence: annual
-    use: not_applicable
-    probe: https://www.mrlc.gov/geoserver/ows?service=WMS&request=GetCapabilities
-    verified: ok (WMS/WCS; capabilities doc is ~16 MB)
   - id: usgs_m2m
     name: USGS EarthExplorer Machine-to-Machine API (Landsat, SRTM)
     coverage: global
@@ -199,12 +146,3 @@ sources:
     use: reference
     probe: https://m2m.cr.usgs.gov/api/api/json/stable/
     verified: API alive (JSON 404 on the bare base; every call needs an ERS login + M2M access request)
-  - id: usgs_nwis
-    name: USGS Water Services (NWIS streamflow / groundwater)
-    coverage: us
-    access: api
-    auth: none
-    cadence: 15-min
-    use: not_applicable
-    probe: https://waterservices.usgs.gov/nwis/iv/?format=json&sites=01646500&parameterCd=00060
-    verified: ok

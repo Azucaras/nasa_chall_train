@@ -45,7 +45,7 @@ def probe(url: str) -> dict[str, object]:
 def main() -> None:
     p = base_parser(__doc__ or "")
     p.add_argument("--only", nargs="*", help="source ids to probe")
-    p.add_argument("--coverage", nargs="*", choices=["global", "brazil", "us"])
+    p.add_argument("--coverage", nargs="*", choices=["global", "brazil"])
     args = p.parse_args()
     setup_logging(args.verbose)
 

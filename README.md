@@ -133,8 +133,9 @@ historical classification of analog years. ONI is kept alongside for comparison 
 literature. Episode and strength rules are CPC's own and live in `config/enso.yaml` with their
 sources.
 
-The full source review, including the US-only datasets that cannot serve Brazilian municipalities
-and their global equivalents, is in [docs/data_sources.md](docs/data_sources.md).
+**Scope is Brazil only.** Every source is Brazilian or global with coverage of Brazil. US-only
+datasets (PRISM, NRCS soils, CropScape, NLCD, NAIP, CoCoRaHS, USGS water data) were reviewed and
+excluded; the review and their replacements are in [docs/data_sources.md](docs/data_sources.md).
 
 ## Ground rules
 
@@ -171,9 +172,9 @@ These are enforced in review, and in `CLAUDE.md`:
   crop year), `enso_weekly.parquet`, `enso_current.parquet` (latest discussion + index values),
   `enso_strength_forecast.parquet` (CPC strength probabilities, next 9 seasons).
 - `config/enso.yaml`: CPC's episode, strength and "historic" thresholds, each with its source.
-- `config/sources.yaml` + `pipeline/probe_sources.py`: a registry of 21 candidate sources and a
-  cheap reachability check.
-- 37 tests passing.
+- `config/sources.yaml` + `pipeline/probe_sources.py`: a registry of the 14 Brazilian / global
+  sources and a cheap reachability check.
+- 42 tests passing (including a guard that every registered source covers Brazil).
 
 **Not started:** NASA POWER, PAM and CHIRPS ingestion (rest of Phase 1), and Phases 2 through 4. There is no
 API, no web interface, and no scoring code yet.
