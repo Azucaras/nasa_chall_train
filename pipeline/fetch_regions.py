@@ -1,20 +1,34 @@
-"""Resolve pilot municipalities against the IBGE APIs and compute their centroids.
+"""Resolve pilot municipalities against IBGE and compute their centroids.
 
-Reads the declarative list in config/regions.yaml, downloads each municipality's boundary from the
-IBGE *malhas* API, and computes an area-weighted polygon centroid. The centroid is the point handed
-to NASA POWER, so it is derived here rather than hand-typed anywhere.
+Reads the declarative list in config/regions.yaml and gets each municipality's boundary from IBGE,
+then computes an area-weighted polygon centroid. The centroid is the point handed to NASA POWER, so
+it is derived here rather than hand-typed anywhere.
 
-Output: data/processed/regions.parquet
+Two official IBGE routes to the same boundary, tried in order:
+
+1. the *malhas* API (``servicodados.ibge.gov.br``), one small GeoJSON per municipality;
+2. the per-state municipal shapefile on ``geoftp.ibge.gov.br`` (2025 mesh, ~10 MB per state).
+
+The API resets connections from outside Brazil, so (2) is what a cloud runner ends up using. Which
+route produced each row is recorded in the ``geometry_source`` column.
+
+Outputs:
+    data/processed/regions.parquet   one row per municipality, centroid + bbox
+    data/processed/regions.geojson   simplified outlines (~100 m tolerance) for the web map
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pandas as pd
+import requests
 
 from pipeline.common import (
+    PROCESSED_DIR,
     base_parser,
+    fetch_file,
     fetch_json,
     load_config,
     log,
@@ -27,6 +41,14 @@ MALHA_URL = (
     "https://servicodados.ibge.gov.br/api/v3/malhas/municipios/{code}"
     "?formato=application/vnd.geo%2Bjson&qualidade=intermediaria"
 )
+MESH_YEAR = 2025
+UF_MESH_URL = (
+    "https://geoftp.ibge.gov.br/organizacao_do_territorio/malhas_territoriais/malhas_municipais/"
+    "municipio_{year}/UFs/{uf}/{uf}_Municipios_{year}.zip"
+)
+# Simplification tolerance for the map outline only, in degrees (~100 m). Centroids and bounds are
+# always computed from the full-resolution geometry.
+MAP_TOLERANCE_DEG = 0.001
 
 
 def _ring_area_and_centroid(ring: list[list[float]]) -> tuple[float, float, float]:
@@ -97,56 +119,94 @@ def bounds(geometry: dict[str, Any]) -> tuple[float, float, float, float]:
     return min(xs), min(ys), max(xs), max(ys)
 
 
+def geometry_from_api(code: int, refresh: bool) -> dict[str, Any]:
+    geojson = fetch_json(MALHA_URL.format(code=code), f"ibge_malha_{code}.geojson", refresh)
+    return geojson["features"][0]["geometry"]
+
+
+def geometry_from_uf_mesh(code: int, uf: str, refresh: bool) -> dict[str, Any]:
+    import shapefile  # pyshp
+
+    path = fetch_file(
+        UF_MESH_URL.format(year=MESH_YEAR, uf=uf), f"ibge_{uf}_Municipios_{MESH_YEAR}.zip", refresh
+    )
+    with shapefile.Reader(str(path)) as reader:
+        for rec, shp in zip(reader.iterRecords(fields=["CD_MUN"]), reader.iterShapes()):
+            if int(rec["CD_MUN"]) == code:
+                return shp.__geo_interface__
+    raise LookupError(f"municipality {code} not found in the {uf} {MESH_YEAR} mesh")
+
+
+def resolve_geometry(code: int, uf: str, refresh: bool) -> tuple[dict[str, Any], str]:
+    """Return (geometry, source label), preferring the API and falling back to the UF mesh."""
+    try:
+        return geometry_from_api(code, refresh), "IBGE malhas API v3 (qualidade=intermediaria)"
+    except requests.RequestException as exc:
+        log.warning("IBGE malhas API unavailable for %d (%s); using the %s UF mesh",
+                    code, type(exc).__name__, MESH_YEAR)
+        return geometry_from_uf_mesh(code, uf, refresh), f"IBGE malha municipal {MESH_YEAR}, {uf} shapefile"
+
+
+def simplified_feature(geometry: dict[str, Any], properties: dict[str, Any]) -> dict[str, Any]:
+    from shapely.geometry import mapping, shape
+
+    simple = shape(geometry).simplify(MAP_TOLERANCE_DEG, preserve_topology=True)
+    return {"type": "Feature", "properties": properties, "geometry": mapping(simple)}
+
+
 def main() -> None:
     args = base_parser(__doc__ or "").parse_args()
     setup_logging(args.verbose)
 
     meta = load_config("regions.yaml")["meta"]
     rows: list[dict[str, Any]] = []
+    features: list[dict[str, Any]] = []
 
     for mun in pilot_municipalities():
         code = int(mun["code"])
-        geojson = fetch_json(
-            MALHA_URL.format(code=code),
-            cache_name=f"ibge_malha_{code}.geojson",
-            refresh=args.refresh,
-        )
-        geometry = geojson["features"][0]["geometry"]
+        geometry, geometry_source = resolve_geometry(code, mun["uf"], args.refresh)
         lon, lat = centroid(geometry)
         min_lon, min_lat, max_lon, max_lat = bounds(geometry)
 
-        log.info("%s (%d): centroid %.4f, %.4f", mun["name"], code, lon, lat)
-        rows.append(
-            {
-                "code": code,
-                "name": mun["name"],
-                "uf": mun["uf"],
-                "mesoregion": mun["mesoregion"],
-                "region_id": mun["region_id"],
-                "region_name": mun["region_name"],
-                "enso_signal": mun["enso_signal"],
-                "hazards": ",".join(mun["hazards"]),
-                "centroid_lon": round(lon, 4),
-                "centroid_lat": round(lat, 4),
-                "min_lon": min_lon,
-                "min_lat": min_lat,
-                "max_lon": max_lon,
-                "max_lat": max_lat,
-            }
-        )
+        log.info("%s (%d): centroid %.4f, %.4f [%s]", mun["name"], code, lon, lat, geometry_source)
+        row = {
+            "code": code,
+            "name": mun["name"],
+            "uf": mun["uf"],
+            "mesoregion": mun["mesoregion"],
+            "region_id": mun["region_id"],
+            "region_name": mun["region_name"],
+            "enso_signal": mun["enso_signal"],
+            "hazards": ",".join(mun["hazards"]),
+            "centroid_lon": round(lon, 4),
+            "centroid_lat": round(lat, 4),
+            "min_lon": min_lon,
+            "min_lat": min_lat,
+            "max_lon": max_lon,
+            "max_lat": max_lat,
+            "geometry_source": geometry_source,
+        }
+        rows.append(row)
+        features.append(simplified_feature(geometry, {k: row[k] for k in (
+            "code", "name", "uf", "region_id", "enso_signal", "centroid_lon", "centroid_lat")}))
 
     df = pd.DataFrame(rows)
     write_parquet(
         df,
         "regions.parquet",
         metadata={
-            "source": "IBGE malhas API v3 (qualidade=intermediaria)",
-            "centroid_method": "area-weighted polygon centroid, degrees lon/lat",
+            "source": "; ".join(sorted(set(df.geometry_source))),
+            "centroid_method": "area-weighted polygon centroid, degrees lon/lat, full-resolution geometry",
             "climatology_baseline": f"{meta['climatology_baseline'][0]}-{meta['climatology_baseline'][1]}",
             "generated_by": "pipeline/fetch_regions.py",
         },
     )
-    print(df[["code", "name", "uf", "centroid_lon", "centroid_lat", "enso_signal"]].to_string(index=False))
+    out = PROCESSED_DIR / "regions.geojson"
+    out.write_text(json.dumps({"type": "FeatureCollection", "features": features}), encoding="utf-8")
+    log.info("wrote %s (%.1f KB, simplified at %.4f deg)", out.name, out.stat().st_size / 1024,
+             MAP_TOLERANCE_DEG)
+    print(df[["code", "name", "uf", "centroid_lon", "centroid_lat", "enso_signal", "geometry_source"]]
+          .to_string(index=False))
 
 
 if __name__ == "__main__":

@@ -13,6 +13,9 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "pydantic>=2.8",
     "truststore>=0.10.5",
+    "beautifulsoup4>=4.12",
+    "pyshp>=2.3",
+    "shapely>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -25,6 +28,14 @@ satellite = [
     "netcdf4>=1.7",
     "geopandas>=1.0",
     "shapely>=2.0",
+]
+
+# Microsoft Planetary Computer (MODIS NDVI, land cover, elevation). No credentials needed:
+# public STAC search + short-lived SAS tokens issued anonymously by planetarycomputer.microsoft.com.
+planetary = [
+    "pystac-client>=0.8",
+    "planetary-computer>=1.0",
+    "rasterio>=1.4",
 ]
 
 [dependency-groups]
